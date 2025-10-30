@@ -1,11 +1,18 @@
 import os
 import logging
 from datetime import datetime
-from dotenv import load_dotenv
 import base64
 
-# Cargar variables del .env
-load_dotenv()
+import os
+
+# En Railway, las variables vienen directamente de os.getenv()
+# No necesitamos load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()  # Para desarrollo local
+except:
+    pass
+
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
