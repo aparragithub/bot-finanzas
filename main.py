@@ -1,10 +1,11 @@
 import os
 import logging
 from datetime import datetime
-from dotenv import load_dotenv  # ← AGREGAR ESTO
+from dotenv import load_dotenv
+import base64
 
 # Cargar variables del .env
-load_dotenv()  # ← AGREGAR ESTO
+load_dotenv()
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -23,6 +24,18 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+# 🔑 DECODIFICAR CREDENCIALES DE RAILWAY
+if os.getenv('GOOGLE_CREDENTIALS_B64'):
+    try:
+        creds_b64 = os.getenv('GOOGLE_CREDENTIALS_B64')
+        creds_json = base64.b64decode(creds_b64).decode('utf-8')
+        with open('google_credentials.json', 'w') as f:
+            f.write(creds_json)
+        logger.info("Credenciales de Google decodificadas")
+    except Exception as e:
+        logger.error(f"Error decodificando credenciales: {e}")
+
 
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
