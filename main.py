@@ -151,8 +151,8 @@ ESTRUCTURA JSON REQUERIDA:
 
 CATEGORÍAS DISPONIBLES (BASADAS EN USO REAL):
 1. "Sueldo" - Ingresos de trabajo
-2. "Alimentación" - Comida, restaurantes, supermercado, delivery (Yummy, etc)
-3. "Transporte" - Taxis, uber, traslados, gasolina
+2. "Alimentación" - Comida, restaurantes, supermercado
+3. "Transporte" - Taxis, uber, traslados, gasolina, delivery (Yummy, etc)
 4. "Salud" - Seguros médicos, medicinas, doctores
 5. "Servicios" - Celular, internet, agua, luz
 6. "Comisión" - Comisiones bancarias, transferencias
@@ -250,8 +250,8 @@ REGLAS PARA UBICACIÓN (Muy Importante):
 2. Si menciona "usdt" o "binance" → Binance, moneda USDT
 3. Si menciona "usd" o "ecuador" → Ecuador, moneda USD
 4. Si menciona celular ecuatoriano (Movistar EC, Claro EC) → Ecuador
-5. Si menciona aplicaciones venezolanas (Pago Móvil, BanCo) → Venezuela
-6. Si NO especifica y es EGRESO → Asumir Ecuador (USD)
+5. Si menciona aplicaciones venezolanas (Pago Móvil, Banco) → Venezuela
+6. Si NO especifica y es EGRESO → Asumir Venezuela (Bs)
 7. Si NO especifica y es INGRESO → Asumir Ecuador (USD)
 8. Si NO especifica y es CONVERSIÓN:
    - Si destino es Bs → origen es USDT (Binance)
@@ -259,7 +259,7 @@ REGLAS PARA UBICACIÓN (Muy Importante):
 
 REGLAS ESPECIALES:
 
-1. "Yummy" + número grande (100+) → Alimentación
+1. "Yummy" + número grande (100+) → Transporte
 2. "Yummy" + número pequeño (< 100) → Transporte
 3. "Cashe/Cashea" → SIEMPRE Alimentación
 4. "Multimax" → SIEMPRE Compras
@@ -514,6 +514,7 @@ Escribe tus gastos o ingresos en lenguaje natural.
 /saldo ecuador - Solo saldo en Ecuador
 /saldo venezuela - Solo saldo en Venezuela
 /saldo binance - Solo saldo en Binance
+/resumen - Resumen del mes actual (ingresos, egresos, balance)
 
 Todas tus transacciones se guardan automáticamente en Google Sheets."""
 
@@ -722,6 +723,106 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• 'cambié 120 por 2760 bs' (o: 'cambie')\n"
             "• 'cambié 102.24 usd a 100 usdt' (o: 'cambie')"
         )
+        
+async def comando_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /resumen - Ver resumen del mes actual"""
+    try:
+        from datetime import datetime
+        
+        spreadsheet = get_or_create_spreadsheet()
+        gestor_saldos = GestorSaldos(spreadsheet.sheet1, gestor_tasas)
+
+        # Obtener todas las transacciones
+        transacciones = gestor_saldos.obtener_todas_transacciones()
+        
+        # Filtrar transacciones del mes actual
+        mes_actual = datetime.now().month
+        año_actual = datetime.now().year
+        
+        gastos_por_categoria = {}
+        ingresos_por_categoria = {}
+        total_ingresos = 0
+        total_egresos = 0
+        
+        for trans in transacciones:
+            try:
+                fecha_str = trans.get("Fecha", "")
+                fecha = datetime.strptime(fecha_str[:10], "%Y-%m-%d")
+                
+                # Solo transacciones del mes actual
+                if fecha.month != mes_actual or fecha.year != año_actual:
+                    continue
+                
+                tipo = trans.get("Tipo", "").lower()
+                categoria = trans.get("Categoría", "Otros")
+                monto_str = str(trans.get("USD Equivalente", 0)).replace(',', '.')
+                
+                try:
+                    monto = abs(float(monto_str))
+                except:
+                    monto = 0
+                
+                if tipo == "egreso":
+                    if categoria not in gastos_por_categoria:
+                        gastos_por_categoria[categoria] = 0
+                    gastos_por_categoria[categoria] += monto
+                    total_egresos += monto
+                    
+                elif tipo == "ingreso":
+                    if categoria not in ingresos_por_categoria:
+                        ingresos_por_categoria[categoria] = 0
+                    ingresos_por_categoria[categoria] += monto
+                    total_ingresos += monto
+                    
+            except Exception as e:
+                logger.warning(f"Error procesando transacción para resumen: {e}")
+                continue
+        
+        # Construir mensaje
+        mes_nombre = datetime.now().strftime("%B").upper()
+        
+        mensaje = f"📊 RESUMEN DEL MES - {mes_nombre} {año_actual}\n"
+        mensaje += "═══════════════════════════════════════════\n\n"
+        
+        # INGRESOS
+        mensaje += "💰 INGRESOS\n"
+        mensaje += "───────────────────────────────────────\n"
+        if ingresos_por_categoria:
+            for cat in sorted(ingresos_por_categoria.keys()):
+                monto = ingresos_por_categoria[cat]
+                mensaje += f"  {cat}: ${monto:.2f}\n"
+            mensaje += f"\n  TOTAL INGRESOS: ${total_ingresos:.2f}\n"
+        else:
+            mensaje += "  Sin ingresos registrados\n"
+        
+        # EGRESOS
+        mensaje += "\n💸 EGRESOS\n"
+        mensaje += "───────────────────────────────────────\n"
+        if gastos_por_categoria:
+            for cat in sorted(gastos_por_categoria.keys()):
+                monto = gastos_por_categoria[cat]
+                mensaje += f"  {cat}: ${monto:.2f}\n"
+            mensaje += f"\n  TOTAL EGRESOS: ${total_egresos:.2f}\n"
+        else:
+            mensaje += "  Sin egresos registrados\n"
+        
+        # RESUMEN FINAL
+        balance = total_ingresos - total_egresos
+        mensaje += "\n═══════════════════════════════════════════\n"
+        mensaje += f"📈 BALANCE: ${balance:.2f}\n"
+        
+        if balance > 0:
+            mensaje += "✅ Mes superavitario\n"
+        elif balance < 0:
+            mensaje += "⚠️ Mes deficitario\n"
+        else:
+            mensaje += "⚖️ Mes balanceado\n"
+        
+        await update.message.reply_text(mensaje)
+        
+    except Exception as e:
+        logger.error(f"Error en comando /resumen: {e}")
+        await update.message.reply_text(f"❌ Error: {str(e)}")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Manejo de errores global"""
@@ -747,6 +848,7 @@ def main():
     application.add_handler(CommandHandler("tasa", comando_tasa))
     application.add_handler(CommandHandler("settasa", comando_settasa))
     application.add_handler(CommandHandler("saldo", comando_saldo))
+    application.add_handler(CommandHandler("resumen", comando_resumen))
 
     # Mensajes
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
