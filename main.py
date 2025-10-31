@@ -464,6 +464,7 @@ COMANDOS DISPONIBLES:
 /saldo ecuador - Ver solo Ecuador
 /saldo venezuela - Ver solo Venezuela
 /saldo binance - Ver solo Binance
+/resumen - Resumen del mes actual (ingresos, egresos, balance)
 
 ¡Empieza a registrar tus finanzas!"""
 
