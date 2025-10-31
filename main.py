@@ -131,7 +131,7 @@ def classify_transaction(text: str) -> dict:
         # Normalizar entrada
         normalized_text = normalize_input(text)
 
-        prompt = f"""Eres un asistente EXPERTO en clasificar transacciones financieras. Tu respuesta DEBE ser JSON válido.
+        prompt = f"""Eres un asistente EXPERTO en clasificar transacciones financieras personales. Tu respuesta DEBE ser JSON válido.
 
 TEXTO A CLASIFICAR: "{normalized_text}"
 
@@ -140,7 +140,7 @@ INSTRUCCIÓN: Responde SOLO con JSON válido. SIN explicaciones, SIN markdown, S
 ESTRUCTURA JSON REQUERIDA:
 {{
     "tipo": "Ingreso" o "Egreso" o "Conversión",
-    "categoria": una de: "Alimentación", "Transporte", "Servicios", "Entretenimiento", "Salud", "Educación", "Sueldo", "Freelance", "Inversiones", "Comisión", "Otros",
+    "categoria": una de las listadas abajo,
     "ubicacion": "Ecuador" o "Venezuela" o "Binance",
     "moneda": "USD" o "Bs" o "USDT",
     "monto": número positivo,
@@ -149,68 +149,179 @@ ESTRUCTURA JSON REQUERIDA:
     "descripcion": string breve
 }}
 
+CATEGORÍAS DISPONIBLES (BASADAS EN USO REAL):
+1. "Sueldo" - Ingresos de trabajo
+2. "Alimentación" - Comida, restaurantes, supermercado, delivery (Yummy, etc)
+3. "Transporte" - Taxis, uber, traslados, gasolina
+4. "Salud" - Seguros médicos, medicinas, doctores
+5. "Servicios" - Celular, internet, agua, luz
+6. "Comisión" - Comisiones bancarias, transferencias
+7. "Compras" - Tarjetas de crédito (Multimax), compras en general
+8. "Limpieza" - Artículos de limpieza, fundas, aseo
+9. "IA" - Servicios de IA (Claude, ChatGPT, Groq)
+10. "Conversión" - Cambio de moneda
+11. "Saldo" - Registro de saldos iniciales
+12. "Otro" - Lo que no encaje en las anteriores
+
+PALABRAS CLAVE PARA MEJOR CLASIFICACIÓN:
+
+ALIMENTACIÓN (incluye):
+- comida, comida, almuerzo, desayuno, cena, comer
+- restaurante, comedor, pizzería, pollería
+- supermercado, mercado, tienda
+- pan, leche, huevos, carnes
+- delivery (Yummy, PedidosYa, UberEats, etc)
+- cashe, cashea (app de crédito para comida)
+- café, bebidas
+- pollera de pollos, panadería
+
+TRANSPORTE (incluye):
+- taxi, uber, traslado
+- gasolina, combustible
+- yummy (cuando es SOLO traslado, no comida)
+- moto, uber moto
+- pasaje, boleto
+
+SERVICIOS (incluye):
+- celular, teléfono, movistar, digitel
+- internet, wifi
+- agua, acueducto
+- luz, electricidad, corpoelec
+- gas, sergas
+- cable, tv
+
+SALUD (incluye):
+- seguro, médico, doctor, clínica
+- medicina, farmacia, medicinas
+- hospital, ambulancia
+- odontólogo, dentista
+
+COMISIÓN (incluye):
+- comisión, comisiones
+- pago móvil, transferencia bancaria
+- retiro, depósito
+
+COMPRAS (incluye):
+- multimax, tarjeta de crédito
+- deuda de tarjeta
+- compra de bienes
+
+LIMPIEZA (incluye):
+- fundas, bolsas
+- escoba, trapeador
+- detergente, jabón
+- limpieza, aseo
+- artículos de limpieza
+
+CONVERSIÓN (incluye):
+- cambié, cambie, cambio
+- convertí, convierte
+- intercambié, intercambio
+- traslado de dinero entre monedas
+
+SALDO (incluye):
+- saldo, saldo inicial
+- ingreso de, recibí
+- depósito inicial
+
 PALABRAS CLAVE PARA TIPO:
-- CONVERSIÓN: cambié, cambie, cambio, convertí, convierte, intercambié, intercambio, traslado, cambiaste
-- EGRESO: gasto, gaste, gasté, compré, compre, compra, pagué, pague, pago, envié, envie, envio
-- INGRESO: ingreso, cobré, cobre, cobro, sueldo, ganancia, recibí, recibe, recibo, deposito, transferencia (entrante)
+
+CONVERSIÓN:
+- cambié, cambie, cambio, convertí, convierte
+- intercambié, intercambio, traslado
+- por (seguido de número) - "cambié 100 por 95"
+
+EGRESO:
+- gasto, gaste, gasté, pagué, pague, pago
+- compré, compre, compra
+- pago de, deuda de
+- envié, envie
+
+INGRESO:
+- ingreso, cobré, cobre, cobro
+- sueldo, salario
+- ganancia, recibí, recibe, recibo
+- deposito, transferencia (entrante)
+- saldo
+
+REGLAS PARA UBICACIÓN (Muy Importante):
+
+1. Si menciona "Bs" o "bolivar" → Venezuela, moneda Bs
+2. Si menciona "usdt" o "binance" → Binance, moneda USDT
+3. Si menciona "usd" o "ecuador" → Ecuador, moneda USD
+4. Si menciona celular ecuatoriano (Movistar EC, Claro EC) → Ecuador
+5. Si menciona aplicaciones venezolanas (Pago Móvil, BanCo) → Venezuela
+6. Si NO especifica y es EGRESO → Asumir Ecuador (USD)
+7. Si NO especifica y es INGRESO → Asumir Ecuador (USD)
+8. Si NO especifica y es CONVERSIÓN:
+   - Si destino es Bs → origen es USDT (Binance)
+   - Si destino es USDT → origen es USD (Ecuador)
+
+REGLAS ESPECIALES:
+
+1. "Yummy" + número grande (100+) → Alimentación
+2. "Yummy" + número pequeño (< 100) → Transporte
+3. "Cashe/Cashea" → SIEMPRE Alimentación
+4. "Multimax" → SIEMPRE Compras
+5. "Fundas" → SIEMPRE Limpieza
+6. "Corte de cabello" → Otro
+7. "Traslado para..." → Transporte
+8. "Gasto en..." → Depende contexto (comida=Alimentación, traslado=Transporte)
 
 REGLAS PARA CONVERSIONES (CRÍTICO):
-SI es CONVERSIÓN, SIEMPRE llenar moneda_destino y monto_destino:
+Si es CONVERSIÓN, SIEMPRE llenar moneda_destino y monto_destino:
 
 DETECCIÓN AUTOMÁTICA DE MONEDA ORIGEN:
-1. Si el destino es "Bs" o menciona "bolivar" o "venezuela" → ORIGEN es USDT (Binance → Venezuela)
-2. Si el destino es "USDT" o menciona "binance" o "cripto" → ORIGEN es USD (Ecuador → Binance)
-3. Si el destino es "USD" → ORIGEN es USDT o Bs (dependiendo contexto)
-4. Si NO especifica origen pero el monto destino es muy grande (>1000) y destino es Bs → ORIGEN es USDT
-5. Si dice "por X mil" con "Bs" → ORIGEN es USDT
-6. Si el monto origen es pequeño (<200) y destino es grande (>1000) → ORIGEN es USDT, destino es Bs
+1. Si destino es "Bs" → origen es USDT (Binance → Venezuela)
+2. Si destino es "USDT" → origen es USD (Ecuador → Binance)
+3. Si no especifica origen pero monto_destino > 1000 y destino es Bs → origen es USDT
 
-REGLA DE ORO PARA "cambié X por Y Bs":
-- Si X < 500 y Y es en miles (ej: 10000, 5000, 3650) → USDT → Bs, ubicación origen: Binance
+EJEMPLOS BASADOS EN TUS DATOS REALES:
 
-EJEMPLOS CRÍTICOS (SEGUIR EXACTAMENTE):
-1. "cambié 33.06 por 10mil Bs" 
-   → {{tipo: "Conversión", moneda: "USDT", monto: 33.06, moneda_destino: "Bs", monto_destino: 10000}}
+1. "pago de seguro médico" 
+   → {{tipo: "Egreso", categoria: "Salud", moneda: "Bs", ubicacion: "Venezuela", monto: 31487.62}}
 
-2. "cambié 33,06 por 10mil bs" 
-   → {{tipo: "Conversión", moneda: "USDT", monto: 33.06, moneda_destino: "Bs", monto_destino: 10000}}
+2. "Gasto en pollera de pollos"
+   → {{tipo: "Egreso", categoria: "Alimentación", moneda: "Bs", ubicacion: "Venezuela", monto: 7273.2}}
 
-3. "cambié 100 usdt por 3650 bs" 
-   → {{tipo: "Conversión", moneda: "USDT", monto: 100, moneda_destino: "Bs", monto_destino: 3650}}
+3. "Pago por yummy"
+   → {{tipo: "Egreso", categoria: "Transporte", moneda: "Bs", ubicacion: "Venezuela", monto: 741.38}}
 
-4. "cambié 125 usd por 120 usdt" 
-   → {{tipo: "Conversión", moneda: "USD", monto: 125, moneda_destino: "USDT", monto_destino: 120}}
+4. "Compra de fundas"
+   → {{tipo: "Egreso", categoria: "Limpieza", moneda: "Bs", ubicacion: "Venezuela", monto: 3530}}
 
-5. "cambié 125 por 120" 
-   → {{tipo: "Conversión", moneda: "USD", monto: 125, moneda_destino: "USDT", monto_destino: 120}}
+5. "Gasto en corte de cabello"
+   → {{tipo: "Egreso", categoria: "Otro", moneda: "Bs", ubicacion: "Venezuela", monto: 1200}}
 
-6. "cambié 100 por 3650 bs" 
-   → {{tipo: "Conversión", moneda: "USDT", monto: 100, moneda_destino: "Bs", monto_destino: 3650}}
+6. "pago de cuota cashe"
+   → {{tipo: "Egreso", categoria: "Alimentación", moneda: "Bs", ubicacion: "Venezuela", monto: 7746.62}}
 
-REGLAS PARA MONEDAS (UBICACIONES):
-- Si menciona "bs" o "bolivar" → moneda="Bs", ubicacion="Venezuela"
-- Si menciona "usdt" o "binance" → moneda="USDT", ubicacion="Binance"
-- Si menciona "usd" → moneda="USD", ubicacion="Ecuador"
-- Si NO especifica en CONVERSIÓN:
-  - Si destino es Bs → origen es USDT (Binance)
-  - Si destino es USDT → origen es USD (Ecuador)
-  - Si monto_destino > 1000 y destino es Bs → origen es USDT
-- Si NO especifica en EGRESO/INGRESO → asumir USD, ubicacion="Ecuador"
+7. "pago deuda de celular de Ecuador"
+   → {{tipo: "Egreso", categoria: "Servicios", moneda: "USD", ubicacion: "Ecuador", monto: 283.41}}
+
+8. "Ingreso de sueldo"
+   → {{tipo: "Ingreso", categoria: "Sueldo", moneda: "USD", ubicacion: "Ecuador", monto: 1467.91}}
+
+9. "cambié 203.45 por 200 USDT"
+   → {{tipo: "Conversión", moneda: "USD", monto: 203.45, moneda_destino: "USDT", monto_destino: 200}}
+
+10. "cambié 49.71 USDT por 15000 Bs"
+    → {{tipo: "Conversión", moneda: "USDT", monto: 49.71, moneda_destino: "Bs", monto_destino: 15000}}
 
 VALIDACIÓN:
 ✓ monto DEBE ser número positivo
-✓ Si tipo="Conversión": moneda_destino y monto_destino NO DEBEN ser null o 0
-✓ descripcion DEBE describir la transacción claramente
-✓ NUNCA guardar conversión como "Conversión" en ubicacion, siempre especificar Ecuador/Binance/Venezuela
+✓ Si tipo="Conversión": moneda_destino y monto_destino NO deben ser null
+✓ descripcion DEBE describir claramente la transacción
+✓ Categoría DEBE ser una de las 12 listadas
 """
 
         response = groq_client.chat.completions.create(
             messages=[
-                {"role": "system", "content": "Eres un asistente que clasifica transacciones financieras. Responde SOLO con JSON válido."},
+                {"role": "system", "content": "Eres un asistente que clasifica transacciones financieras. Responde SOLO con JSON válido basado en datos reales."},
                 {"role": "user", "content": prompt}
             ],
             model="llama-3.3-70b-versatile",
-            temperature=0.3,
+            temperature=0.2,  # Más bajo para más precisión
             max_tokens=400
         )
 
@@ -239,13 +350,13 @@ VALIDACIÓN:
         except (ValueError, TypeError):
             raise ValueError(f"Monto inválido: {result.get('monto')}")
 
-        # Agregar campos opcionales si no existen
+        # Agregar campos opcionales
         if 'moneda_destino' not in result:
             result['moneda_destino'] = None
         if 'monto_destino' not in result:
             result['monto_destino'] = None
 
-        # Validar conversión: si es Conversión, debe tener moneda_destino y monto_destino
+        # Validar conversión
         if result['tipo'].lower() == 'conversión':
             if not result.get('moneda_destino') or result.get('moneda_destino') == '':
                 raise ValueError("Para una conversión, debe especificar moneda_destino")
