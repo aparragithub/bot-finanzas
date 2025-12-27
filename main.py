@@ -385,12 +385,29 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 from PIL import Image
                 image = Image.open(img_buffer)
                 
-                model = genai.GenerativeModel('models/gemini-2.0-flash')
-                response = model.generate_content([prompt_vision, image])
-                result_text = response.text.strip()
+                # Usar el alias genérico "latest" que suele ser más estable en quota
+                model_name = 'models/gemini-flash-latest' 
+                model = genai.GenerativeModel(model_name)
+                
+                # Intentar hasta 2 veces si hay error de quota (429)
+                import time
+                from google.api_core import exceptions
+                
+                for attempt in range(2):
+                    try:
+                        response = model.generate_content([prompt_vision, image])
+                        result_text = response.text.strip()
+                        break # Éxito, salir del loop
+                    except exceptions.ResourceExhausted:
+                        if attempt == 0:
+                            logger.warning("⚠️ Quota de Gemini excedida (429). Esperando 7s para reintentar...")
+                            time.sleep(7)
+                            continue
+                        else:
+                            raise # Falló segunda vez
                 
                 # Limpiar markdown
-                if result_text.startswith('```'):
+                if result_text and result_text.startswith('```'):
                     result_text = result_text.split('```')[1]
                     if result_text.strip().startswith('json'):
                         result_text = result_text.strip()[4:]
