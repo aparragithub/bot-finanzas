@@ -410,7 +410,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Obtener tasa si es Bs
         tasa_para_guardar = None
         if transaction['moneda'] == "Bs":
-            tasa_para_guardar = transaction.get('tasa_especifica') or gestor_tasas.obtener_tasa()
+            tasa_para_guardar = transaction.get('tasa_especifica')
 
         success, msg_extra = save_to_sheets(transaction, tasa_para_guardar)
         
@@ -689,7 +689,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Obtener tasa para conversión si es Bs
         tasa_para_guardar = None
         if transaction['moneda'] == "Bs":
-            tasa_para_guardar = transaction.get('tasa_especifica') or gestor_tasas.obtener_tasa()
+            tasa_para_guardar = transaction.get('tasa_especifica')
 
         success, msg_extra = save_to_sheets(transaction, tasa_para_guardar)
 
