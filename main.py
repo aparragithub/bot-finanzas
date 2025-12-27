@@ -480,8 +480,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             fecha_str = fecha_str.replace('2023', '2025')
             transaction['fecha'] = fecha_str
         
-        # 🐛 DEBUG MODE: Mostrar lo que vio el modelo
-        await update.message.reply_text(f"🤖 Debug Vision:\n{json.dumps(transaction, indent=2)}")
         
         # Validar
         if not transaction.get('monto') or not transaction.get('moneda'):
@@ -523,33 +521,30 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando /start"""
-    welcome_message = """Hola! 👋 Soy tu asistente de finanzas personales.
+    welcome_message = """¡Hola! 👋 Soy tu asistente de finanzas personales.
 
-Envíame tus gastos e ingresos en lenguaje natural, por ejemplo:
+📝 **Cómo registrar transacciones:**
 • "gasto 50 bs comida"
 • "ingreso 2000 sueldo"
 • "gasté 15 usd uber"
-• "cobrá 500 freelance venezuela"
-• "cambié 102.24 usd a 100 usdt"
+• "debo 20 usd a @juan" (Registrar deuda)
+• "me deben 50 bs @maria" (Registrar préstamo)
 
-Yo me encargo de:
-✅ Clasificar automáticamente cada transacción
-✅ Convertir a USD usando la tasa BCV
-✅ Guardar en Google Sheets
-✅ Confirmar lo registrado
+📸 **¡NUEVO! Envía una FOTO de tu recibo**
+Yo extraeré automáticamente:
+• Montos (Subtotal, IVA, Total) 🧮
+• Fecha (Si es vieja, buscaré la tasa histórica) 📅
+• Items principales
 
-COMANDOS DISPONIBLES:
+⚙️ **Comandos Disponibles:**
 /start - Este mensaje
-/help - Ayuda detallada
-/tasa - Ver tasa BCV actual
-/settasa 36.5 - Establecer tasa manual
-/saldo - Ver portafolio completo
-/saldo ecuador - Ver solo Ecuador
-/saldo venezuela - Ver solo Venezuela
-/saldo binance - Ver solo Binance
-/resumen - Resumen del mes actual (ingresos, egresos, balance)
+/deudas - 📉 Ver resumen de deudas/préstamos
+/saldo - 💰 Ver portafolio y balances
+/tasa - 💱 Ver tasa BCV actual
+/resumen - 📊 Reporte del mes actual
+/settasa [valor] - Fijar tasa manual
 
-¡Empieza a registrar tus finanzas!"""
+¡Tu dinero, bajo control! 🚀"""
 
     await update.message.reply_text(welcome_message)
 
