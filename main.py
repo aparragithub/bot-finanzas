@@ -124,6 +124,16 @@ def get_or_create_spreadsheet():
             # Nuevos encabezados con Ubicación y Tasa
             worksheet.update('A1:I1', [['Fecha', 'Tipo', 'Categoría', 'Ubicación', 'Moneda', 'Monto', 'Tasa Usada', 'USD Equivalente', 'Descripción']])
             logger.info("Nueva hoja de cálculo V2 creada")
+            
+            # 🟢 COMPARTIR CON EL USUARIO (IMPORTANTE)
+            # Reemplaza 'TU_EMAIL@gmail.com' por tu correo real
+            try:
+                user_email = os.getenv('USER_EMAIL', 'prueba@prueba.com') # Pongo este por defecto o lo dejo en variable
+                if user_email:
+                    spreadsheet.share(user_email, perm_type='user', role='writer')
+                    logger.info(f"Hoja compartida con {user_email}")
+            except Exception as e:
+                logger.error(f"Error al compartir hoja: {e}")
         
         # Inicializar gestor de deudas
         global gestor_deudas
