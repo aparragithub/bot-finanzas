@@ -21,6 +21,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 import json
 import requests
+import google.generativeai as genai
 
 # Importar módulos locales
 from tasas import GestorTasas
@@ -50,8 +51,17 @@ if os.getenv('GOOGLE_CREDENTIALS_B64'):
 
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
 groq_client = Groq(api_key=GROQ_API_KEY)
+
+# Configurar Gemini si hay key disponible
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    logger.info("✅ Gemini API configurada (será usada para Vision)")
+else:
+    logger.warning("⚠️ GEMINI_API_KEY no encontrada, usando Groq Vision (menos preciso)")
+
 gestor_tasas = GestorTasas()  # Instancia global
 gestor_deudas = None # Se inicializa al conectar con Sheets
 
@@ -348,10 +358,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await photo_file.download_to_memory(out=img_buffer)
         img_buffer.seek(0)
         
-        # 3. Encode base64
-        base64_image = base64.b64encode(img_buffer.read()).decode('utf-8')
-        
-        # 4. Enviar a Groq Vision
+        # 3. Analizar con Gemini o Groq Vision
         prompt_vision = """Analiza esta imagen de factura/recibo.
         
         Responde SOLO con este JSON (extrae TODOS los campos que encuentres):
@@ -369,35 +376,67 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         """
         
-        response = groq_client.chat.completions.create(
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt_vision},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}",
-                            },
-                        },
-                    ],
-                }
-            ],
-            model=os.getenv('GROQ_VISION_MODEL', 'llama-3.2-11b-vision-preview'),
-            temperature=0.1,
-            max_tokens=500,
-        )
-
-        result_text = response.choices[0].message.content.strip()
+        result_text = None
         
-        # Limpiar markdown
-        if result_text.startswith('```'):
-            result_text = result_text.split('```')[1]
-            if result_text.strip().startswith('json'):
-                result_text = result_text.strip()[4:]
-            result_text = result_text.strip()
+        # 🔥 PRIORIDAD 1: Usar Gemini si está disponible
+        if GEMINI_API_KEY:
+            try:
+                img_buffer.seek(0)
+                from PIL import Image
+                image = Image.open(img_buffer)
+                
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                response = model.generate_content([prompt_vision, image])
+                result_text = response.text.strip()
+                
+                # Limpiar markdown
+                if result_text.startswith('```'):
+                    result_text = result_text.split('```')[1]
+                    if result_text.strip().startswith('json'):
+                        result_text = result_text.strip()[4:]
+                    result_text = result_text.strip()
+                
+                logger.info(f"✅ Gemini Vision JSON: {result_text}")
+                
+            except Exception as e:
+                logger.error(f"Error con Gemini Vision: {e}, fallback a Groq...")
+                result_text = None
+        
+        # 🔄 FALLBACK: Usar Groq Vision si Gemini falló o no está disponible
+        if not result_text:
+            img_buffer.seek(0)
+            base64_image = base64.b64encode(img_buffer.read()).decode('utf-8')
             
+            response = groq_client.chat.completions.create(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt_vision},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{base64_image}",
+                                },
+                            },
+                        ],
+                    }
+                ],
+                model=os.getenv('GROQ_VISION_MODEL', 'meta-llama/llama-4-scout-17b-16e-instruct'),
+                temperature=0.1,
+                max_tokens=500,
+            )
+
+            result_text = response.choices[0].message.content.strip()
+            
+            # Limpiar markdown
+            if result_text.startswith('```'):
+                result_text = result_text.split('```')[1]
+                if result_text.strip().startswith('json'):
+                    result_text = result_text.strip()[4:]
+                result_text = result_text.strip()
+            
+            logger.info(f"Vision JSON (Groq): {result_text}")
         logger.info(f"Vision JSON: {result_text}")
         transaction = json.loads(result_text)
         
