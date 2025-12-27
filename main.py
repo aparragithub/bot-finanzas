@@ -352,15 +352,20 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         base64_image = base64.b64encode(img_buffer.read()).decode('utf-8')
         
         # 4. Enviar a Groq Vision
-        prompt_vision = """Analiza esta imagen de factura/recibo. Extrae la información y responde SOLO con un JSON válido.
+        prompt_vision = """Analiza esta imagen de factura/recibo.
+        PASOS:
+        1. Identifica todos los montos de dinero.
+        2. Busca las etiquetas "Subtotal", "IVA" (o impuestos), y "TOTAL".
+        3. El "TOTAL" siempre debe ser MAYOR (o igual) al Subtotal.
+        4. Extrae la fecha de emisión.
         
-        ESTRUCTURA JSON:
+        Responde SOLO con este JSON:
         {
             "tipo": "Egreso",
             "categoria": "Alimentación, Transporte, Salud, Servicios, Compras, Limpieza u Otro",
             "ubicacion": "Ecuador" o "Venezuela" (inferir por moneda: Bs=Venezuela, USD=Ecuador),
             "moneda": "USD" o "Bs",
-            "monto": número (CRÍTICO: Busca el "TOTAL A PAGAR" final. DEBE INCLUIR IMPUESTOS (IVA/IGTF). Ignora "Subtotal" o "Base Imponible". Si hay varios montos, el Total suele ser el MAYOR. Ej: Subtotal: 100, IVA: 16, Total: 116 -> USA 116),
+            "monto": número (El valor numérico final TOTAL. IMPORTANTE: NO confundir con Subtotal. Si hay desglose de IVA, suma todo.),
             "descripcion": "nombre del local + items principales",
             "fecha": "DD/MM/YYYY" o null (fecha de emisión),
             "tasa_especifica": número o null (solo si aparece explícitamente la tasa de cambio)
