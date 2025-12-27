@@ -353,25 +353,20 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # 4. Enviar a Groq Vision
         prompt_vision = """Analiza esta imagen de factura/recibo.
-        PASOS:
-        1. Identifica todos los montos de dinero.
-        2. Busca las etiquetas "Subtotal", "IVA" (o impuestos), y "TOTAL".
-        3. El "TOTAL" siempre debe ser MAYOR (o igual) al Subtotal.
-        4. Extrae la fecha de emisión.
         
-        Responde SOLO con este JSON:
+        Responde SOLO con este JSON (extrae TODOS los campos que encuentres):
         {
             "tipo": "Egreso",
             "categoria": "Alimentación, Transporte, Salud, Servicios, Compras, Limpieza u Otro",
             "ubicacion": "Ecuador" o "Venezuela" (inferir por moneda: Bs=Venezuela, USD=Ecuador),
             "moneda": "USD" o "Bs",
-            "monto": número (El valor numérico final TOTAL. IMPORTANTE: NO confundir con Subtotal. Si hay desglose de IVA, suma todo.),
+            "subtotal": número o null (si aparece "Subtotal", "Base Imponible", o "BI"),
+            "iva": número o null (si aparece "IVA", "Impuesto", o "Tax"),
+            "total": número (el monto en la línea "TOTAL" o el número más grande al final),
             "descripcion": "nombre del local + items principales",
-            "fecha": "DD/MM/YYYY" o null (fecha de emisión),
-            "tasa_especifica": número o null (solo si aparece explícitamente la tasa de cambio)
+            "fecha": "DD/MM/YYYY" o null (fecha de emisión - verifica el AÑO, debe ser 2024 o 2025),
+            "tasa_especifica": número o null
         }
-        
-        Si no es claro, responde con error o campos nulos.
         """
         
         response = groq_client.chat.completions.create(
@@ -405,6 +400,29 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         logger.info(f"Vision JSON: {result_text}")
         transaction = json.loads(result_text)
+        
+        # 🧮 VALIDAR Y CORREGIR EL MONTO TOTAL
+        subtotal = transaction.get('subtotal')
+        iva = transaction.get('iva')
+        total = transaction.get('total')
+        
+        # Si hay subtotal + iva, calcular el total real
+        if subtotal and iva:
+            calculated_total = subtotal + iva
+            # Si el "total" reportado difiere, usar el calculado
+            if not total or abs(total - calculated_total) > 0.5:
+                logger.warning(f"Total corregido: {total} -> {calculated_total} (Subtotal: {subtotal}, IVA: {iva})")
+                total = calculated_total
+        
+        # Asignar el monto final
+        transaction['monto'] = total if total else transaction.get('total', 0)
+        
+        # 📅 VALIDAR AÑO (2023 -> 2025 si es sospechoso)
+        fecha_str = transaction.get('fecha')
+        if fecha_str and '2023' in fecha_str:
+            logger.warning(f"Fecha sospechosa (2023), corrigiendo a 2025: {fecha_str}")
+            fecha_str = fecha_str.replace('2023', '2025')
+            transaction['fecha'] = fecha_str
         
         # 🐛 DEBUG MODE: Mostrar lo que vio el modelo
         await update.message.reply_text(f"🤖 Debug Vision:\n{json.dumps(transaction, indent=2)}")
