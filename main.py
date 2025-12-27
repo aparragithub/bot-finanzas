@@ -830,6 +830,14 @@ def main():
 
     logger.info("Iniciando bot de finanzas personales (v2 con múltiples monedas)...")
 
+    # Inicializar Spreadsheet y Gestores al inicio
+    try:
+        get_or_create_spreadsheet()
+        logger.info("✅ Google Sheets conectado y gestores inicializados.")
+    except Exception as e:
+        logger.error(f"❌ Error fatal iniciando Google Sheets: {e}")
+        return
+
     # Iniciar servidor web para Replit
     keep_alive.keep_alive()
 
