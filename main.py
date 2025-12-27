@@ -130,7 +130,7 @@ def get_or_create_spreadsheet():
         
         # Si A1 está vacío, asumimos que es nueva y ponemos encabezados
         if not worksheet.acell('A1').value:
-            worksheet.update('A1:I1', [headers])
+            worksheet.update(range_name='A1:I1', values=[headers])
             logger.info("Encabezados inicializados")
         
         # Inicializar gestor de deudas
