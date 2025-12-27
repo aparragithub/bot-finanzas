@@ -351,7 +351,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     ],
                 }
             ],
-            model="llama-3.2-11b-vision-preview",
+            model="llama-3.2-90b-vision-preview",
             temperature=0.1,
             max_tokens=500,
         )
@@ -403,7 +403,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         logger.error(f"Error procesando foto: {e}")
-        await update.message.reply_text("❌ Error analizando la imagen. Intenta de nuevo o envía el texto.")
+        await update.message.reply_text(f"❌ Error analizando la imagen: {str(e)}\nIntenta de nuevo o envía el texto.")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
