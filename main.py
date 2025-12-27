@@ -112,21 +112,26 @@ def get_or_create_spreadsheet():
         try:
             spreadsheet = gc.open("Finanzas Personales V2 - Bot")
         except gspread.SpreadsheetNotFound:
+            logger.info("Hoja no encontrada. Intentando crear...")
             spreadsheet = gc.create("Finanzas Personales V2 - Bot")
-            worksheet = spreadsheet.sheet1
-            # Nuevos encabezados con Ubicación y Tasa
-            worksheet.update('A1:I1', [['Fecha', 'Tipo', 'Categoría', 'Ubicación', 'Moneda', 'Monto', 'Tasa Usada', 'USD Equivalente', 'Descripción']])
-            logger.info("Nueva hoja de cálculo V2 creada")
             
-            # 🟢 COMPARTIR CON EL USUARIO (IMPORTANTE)
-            # Reemplaza 'TU_EMAIL@gmail.com' por tu correo real
+            # Compartir inmediatamente (solo si el bot la creó)
             try:
-                user_email = os.getenv('USER_EMAIL', 'prueba@prueba.com') # Pongo este por defecto o lo dejo en variable
+                user_email = os.getenv('USER_EMAIL', 'prueba@prueba.com')
                 if user_email:
                     spreadsheet.share(user_email, perm_type='user', role='writer')
-                    logger.info(f"Hoja compartida con {user_email}")
+                    logger.info(f"Hoja creada y compartida con {user_email}")
             except Exception as e:
                 logger.error(f"Error al compartir hoja: {e}")
+
+        # ✅ VERIFICAR Y CONFIGURAR ENCABEZADOS (Funciona para hoja nueva o creada manualmente)
+        worksheet = spreadsheet.sheet1
+        headers = ['Fecha', 'Tipo', 'Categoría', 'Ubicación', 'Moneda', 'Monto', 'Tasa Usada', 'USD Equivalente', 'Descripción']
+        
+        # Si A1 está vacío, asumimos que es nueva y ponemos encabezados
+        if not worksheet.acell('A1').value:
+            worksheet.update('A1:I1', [headers])
+            logger.info("Encabezados inicializados")
         
         # Inicializar gestor de deudas
         global gestor_deudas
