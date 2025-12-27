@@ -346,16 +346,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ESTRUCTURA JSON:
         {
             "tipo": "Egreso",
-            "categoria": "una de: Alimentación, Transporte, Salud, Servicios, Compras, Limpieza, Otro",
-            "ubicacion": "Ecuador" o "Venezuela" (inferir por moneda o dirección),
+            "categoria": "Alimentación, Transporte, Salud, Servicios, Compras, Limpieza u Otro",
+            "ubicacion": "Ecuador" o "Venezuela" (inferir por moneda: Bs=Venezuela, USD=Ecuador),
             "moneda": "USD" o "Bs",
-            "monto": número (total a pagar),
-            "descripcion": "breve descripción de lo comprado (nombre del local + items principales)",
-            "fecha": "DD/MM/YYYY" o null (fecha del recibo),
-            "tasa_especifica": número o null (solo si aparece explícitamente la tasa de cambio)
+            "monto": número (BUSCA EL "TOTAL" o "TOTAL A PAGAR". NO uses el Subtotal. Debe ser el monto final con impuestos),
+            "descripcion": "nombre del local + items principales",
+            "fecha": "DD/MM/YYYY" o null (Busca la fecha de emisión de la factura),
+            "tasa_especifica": número o null (solo si aparece explícitamente la tasa de cambio en la factura)
         }
         
-        Si no es una factura clara, responde con error en el JSON o un JSON con campos nulos.
+        Si no es claro, responde con error o campos nulos.
         """
         
         response = groq_client.chat.completions.create(
