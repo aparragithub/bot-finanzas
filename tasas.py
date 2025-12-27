@@ -114,3 +114,38 @@ class GestorTasas:
         }
 
         return info
+
+    def obtener_tasa_historica(self, fecha_str: str):
+        """
+        Obtiene la tasa histórica para una fecha dada (YYYY-MM-DD).
+        Si cae feriado/fin de semana, busca hacia atrás hasta encontrar.
+        API: api.dolarvzla.com
+        """
+        import datetime
+        
+        try:
+            target_date = datetime.datetime.strptime(fecha_str, "%Y-%m-%d")
+        except ValueError:
+            logger.error(f"Fecha inválida para histórico: {fecha_str}")
+            return None
+
+        # Intentar buscar hasta 5 días atrás
+        for i in range(5):
+            fecha_query = (target_date - datetime.timedelta(days=i)).strftime("%Y-%m-%d")
+            
+            try:
+                url = f"https://api.dolarvzla.com/public/exchange-rate/list?from={fecha_query}&to={fecha_query}"
+                response = requests.get(url, timeout=5)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    item = data.get('rates', [])
+                    if item and len(item) > 0:
+                        tasa = float(item[0]['usd'])
+                        logger.info(f"Tasa histórica encontrada para {fecha_query}: {tasa} (Original: {fecha_str})")
+                        return tasa
+            except Exception as e:
+                logger.error(f"Error api historica: {e}")
+                
+        logger.warning(f"No se encontró tasa histórica cerca de {fecha_str}")
+        return None

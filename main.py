@@ -285,7 +285,17 @@ def save_to_sheets(transaction_data: dict, tasa_usada: float = None) -> bool:
         # Para Bs, necesitamos aplicar el multiplicador
         if moneda == "Bs":
             if not tasa_usada:
-                tasa_usada = gestor_tasas.obtener_tasa()
+                # 🔄 TASA AUTOMÁTICA (Histórica o Actual)
+                try:
+                    fecha_dt = datetime.strptime(fecha, "%Y-%m-%d %H:%M:%S")
+                    if fecha_dt.date() < datetime.now().date():
+                        tasa_usada = gestor_tasas.obtener_tasa_historica(fecha_dt.strftime("%Y-%m-%d"))
+                except:
+                    pass
+                
+                # Si falló histórica o es hoy
+                if not tasa_usada:
+                    tasa_usada = gestor_tasas.obtener_tasa()
             if not tasa_usada:
                 logger.error("No hay tasa para convertir Bs")
                 return False, "Error tasa"
