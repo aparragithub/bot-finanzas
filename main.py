@@ -401,6 +401,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Vision JSON: {result_text}")
         transaction = json.loads(result_text)
         
+        # 🐛 DEBUG MODE: Mostrar lo que vio el modelo
+        await update.message.reply_text(f"🤖 Debug Vision:\n{json.dumps(transaction, indent=2)}")
+        
         # Validar
         if not transaction.get('monto') or not transaction.get('moneda'):
             await update.message.reply_text("❌ No pude leer bien el monto o la moneda de la foto. Intenta con texto.")
