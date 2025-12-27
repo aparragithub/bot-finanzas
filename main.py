@@ -90,23 +90,16 @@ def normalize_input(text: str) -> str:
 def get_google_sheets_client():
     """Obtiene el cliente de Google Sheets"""
     try:
-        # Intenta usar Replit (en producción)
-        hostname = os.getenv('REPLIT_CONNECTORS_HOSTNAME')
-        if hostname:
-            # Código Replit existente aquí
-            x_replit_token = 'repl ' + os.getenv('REPL_IDENTITY', '')
-            # ... resto código Replit
-        else:
-            # Localmente: usar archivo JSON
-            credentials = Credentials.from_service_account_file(
-                'google_credentials.json',
-                scopes=[
-                    'https://www.googleapis.com/auth/spreadsheets',
-                    'https://www.googleapis.com/auth/drive'
-                ]
-            )
-            gc = gspread.authorize(credentials)
-            return gc
+        # Siempre usar credenciales JSON (funciona en Local, Railway y Replit si se configura el secret)
+        credentials = Credentials.from_service_account_file(
+            'google_credentials.json',
+            scopes=[
+                'https://www.googleapis.com/auth/spreadsheets',
+                'https://www.googleapis.com/auth/drive'
+            ]
+        )
+        gc = gspread.authorize(credentials)
+        return gc
     except Exception as e:
         logger.error(f"Error al conectar Google Sheets: {e}")
         raise
