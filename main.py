@@ -25,6 +25,10 @@ import requests
 # Importar módulos locales
 from tasas import GestorTasas
 from saldos import GestorSaldos
+from deudas import GestorDeudas
+from prompts import SYSTEM_PROMPT
+import keep_alive
+import threading
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -49,6 +53,7 @@ GROQ_API_KEY = os.getenv('GROQ_API_KEY')
 
 groq_client = Groq(api_key=GROQ_API_KEY)
 gestor_tasas = GestorTasas()  # Instancia global
+gestor_deudas = None # Se inicializa al conectar con Sheets
 
 def normalize_input(text: str) -> str:
     """Normaliza el input para mejorar compatibilidad sin acentos"""
@@ -112,13 +117,17 @@ def get_or_create_spreadsheet():
         gc = get_google_sheets_client()
 
         try:
-            spreadsheet = gc.open("Finanzas Personales - Bot")
+            spreadsheet = gc.open("Finanzas Personales V2 - Bot")
         except gspread.SpreadsheetNotFound:
-            spreadsheet = gc.create("Finanzas Personales - Bot")
+            spreadsheet = gc.create("Finanzas Personales V2 - Bot")
             worksheet = spreadsheet.sheet1
             # Nuevos encabezados con Ubicación y Tasa
             worksheet.update('A1:I1', [['Fecha', 'Tipo', 'Categoría', 'Ubicación', 'Moneda', 'Monto', 'Tasa Usada', 'USD Equivalente', 'Descripción']])
-            logger.info("Nueva hoja de cálculo creada")
+            logger.info("Nueva hoja de cálculo V2 creada")
+        
+        # Inicializar gestor de deudas
+        global gestor_deudas
+        gestor_deudas = GestorDeudas(spreadsheet)
 
         return spreadsheet
     except Exception as e:
@@ -131,198 +140,17 @@ def classify_transaction(text: str) -> dict:
         # Normalizar entrada
         normalized_text = normalize_input(text)
 
-        prompt = f"""Eres un asistente EXPERTO en clasificar transacciones financieras personales. Tu respuesta DEBE ser JSON válido.
-
-TEXTO A CLASIFICAR: "{normalized_text}"
-
-INSTRUCCIÓN: Responde SOLO con JSON válido. SIN explicaciones, SIN markdown, SIN bloques de código.
-
-ESTRUCTURA JSON REQUERIDA:
-{{
-    "tipo": "Ingreso" o "Egreso" o "Conversión",
-    "categoria": una de las listadas abajo,
-    "ubicacion": "Ecuador" o "Venezuela" o "Binance",
-    "moneda": "USD" o "Bs" o "USDT",
-    "monto": número positivo,
-    "moneda_destino": string o null,
-    "monto_destino": número o null,
-    "descripcion": string breve
-}}
-
-CATEGORÍAS DISPONIBLES (BASADAS EN USO REAL):
-1. "Sueldo" - Ingresos de trabajo
-2. "Alimentación" - Comida, restaurantes, supermercado
-3. "Transporte" - Taxis, uber, traslados, gasolina, delivery (Yummy, etc)
-4. "Salud" - Seguros médicos, medicinas, doctores
-5. "Servicios" - Celular, internet, agua, luz
-6. "Comisión" - Comisiones bancarias, transferencias
-7. "Compras" - Tarjetas de crédito (Multimax), compras en general
-8. "Limpieza" - Artículos de limpieza, fundas, aseo
-9. "IA" - Servicios de IA (Claude, ChatGPT, Groq)
-10. "Conversión" - Cambio de moneda
-11. "Saldo" - Registro de saldos iniciales
-12. "Otro" - Lo que no encaje en las anteriores
-
-PALABRAS CLAVE PARA MEJOR CLASIFICACIÓN:
-
-ALIMENTACIÓN (incluye):
-- comida, comida, almuerzo, desayuno, cena, comer
-- restaurante, comedor, pizzería, pollería
-- supermercado, mercado, tienda
-- pan, leche, huevos, carnes
-- delivery (Yummy, PedidosYa, UberEats, etc)
-- cashe, cashea (app de crédito para comida)
-- café, bebidas
-- pollera de pollos, panadería
-
-TRANSPORTE (incluye):
-- taxi, uber, traslado
-- gasolina, combustible
-- yummy (cuando es SOLO traslado, no comida)
-- moto, uber moto
-- pasaje, boleto
-
-SERVICIOS (incluye):
-- celular, teléfono, movistar, digitel
-- internet, wifi
-- agua, acueducto
-- luz, electricidad, corpoelec
-- gas, sergas
-- cable, tv
-
-SALUD (incluye):
-- seguro, médico, doctor, clínica
-- medicina, farmacia, medicinas
-- hospital, ambulancia
-- odontólogo, dentista
-
-COMISIÓN (incluye):
-- comisión, comisiones
-- pago móvil, transferencia bancaria
-- retiro, depósito
-
-COMPRAS (incluye):
-- multimax, tarjeta de crédito
-- deuda de tarjeta
-- compra de bienes
-
-LIMPIEZA (incluye):
-- fundas, bolsas
-- escoba, trapeador
-- detergente, jabón
-- limpieza, aseo
-- artículos de limpieza
-
-CONVERSIÓN (incluye):
-- cambié, cambie, cambio
-- convertí, convierte
-- intercambié, intercambio
-- traslado de dinero entre monedas
-
-SALDO (incluye):
-- saldo, saldo inicial
-- ingreso de, recibí
-- depósito inicial
-
-PALABRAS CLAVE PARA TIPO:
-
-CONVERSIÓN:
-- cambié, cambie, cambio, convertí, convierte
-- intercambié, intercambio, traslado
-- por (seguido de número) - "cambié 100 por 95"
-
-EGRESO:
-- gasto, gaste, gasté, pagué, pague, pago
-- compré, compre, compra
-- pago de, deuda de
-- envié, envie
-
-INGRESO:
-- ingreso, cobré, cobre, cobro
-- sueldo, salario
-- ganancia, recibí, recibe, recibo
-- deposito, transferencia (entrante)
-- saldo
-
-REGLAS PARA UBICACIÓN (Muy Importante):
-
-1. Si menciona "Bs" o "bolivar" → Venezuela, moneda Bs
-2. Si menciona "usdt" o "binance" → Binance, moneda USDT
-3. Si menciona "usd" o "ecuador" → Ecuador, moneda USD
-4. Si menciona celular ecuatoriano (Movistar EC, Claro EC) → Ecuador
-5. Si menciona aplicaciones venezolanas (Pago Móvil, Banco) → Venezuela
-6. Si NO especifica y es EGRESO → Asumir Venezuela (Bs)
-7. Si NO especifica y es INGRESO → Asumir Ecuador (USD)
-8. Si NO especifica y es CONVERSIÓN:
-   - Si destino es Bs → origen es USDT (Binance)
-   - Si destino es USDT → origen es USD (Ecuador)
-
-REGLAS ESPECIALES:
-
-1. "Yummy" + número grande (100+) → Transporte
-2. "Yummy" + número pequeño (< 100) → Transporte
-3. "Cashe/Cashea" → SIEMPRE Alimentación
-4. "Multimax" → SIEMPRE Compras
-5. "Fundas" → SIEMPRE Limpieza
-6. "Corte de cabello" → Otro
-7. "Traslado para..." → Transporte
-8. "Gasto en..." → Depende contexto (comida=Alimentación, traslado=Transporte)
-
-REGLAS PARA CONVERSIONES (CRÍTICO):
-Si es CONVERSIÓN, SIEMPRE llenar moneda_destino y monto_destino:
-
-DETECCIÓN AUTOMÁTICA DE MONEDA ORIGEN:
-1. Si destino es "Bs" → origen es USDT (Binance → Venezuela)
-2. Si destino es "USDT" → origen es USD (Ecuador → Binance)
-3. Si no especifica origen pero monto_destino > 1000 y destino es Bs → origen es USDT
-
-EJEMPLOS BASADOS EN TUS DATOS REALES:
-
-1. "pago de seguro médico" 
-   → {{tipo: "Egreso", categoria: "Salud", moneda: "Bs", ubicacion: "Venezuela", monto: 31487.62}}
-
-2. "Gasto en pollera de pollos"
-   → {{tipo: "Egreso", categoria: "Alimentación", moneda: "Bs", ubicacion: "Venezuela", monto: 7273.2}}
-
-3. "Pago por yummy"
-   → {{tipo: "Egreso", categoria: "Transporte", moneda: "Bs", ubicacion: "Venezuela", monto: 741.38}}
-
-4. "Compra de fundas"
-   → {{tipo: "Egreso", categoria: "Limpieza", moneda: "Bs", ubicacion: "Venezuela", monto: 3530}}
-
-5. "Gasto en corte de cabello"
-   → {{tipo: "Egreso", categoria: "Otro", moneda: "Bs", ubicacion: "Venezuela", monto: 1200}}
-
-6. "pago de cuota cashe"
-   → {{tipo: "Egreso", categoria: "Alimentación", moneda: "Bs", ubicacion: "Venezuela", monto: 7746.62}}
-
-7. "pago deuda de celular de Ecuador"
-   → {{tipo: "Egreso", categoria: "Servicios", moneda: "USD", ubicacion: "Ecuador", monto: 283.41}}
-
-8. "Ingreso de sueldo"
-   → {{tipo: "Ingreso", categoria: "Sueldo", moneda: "USD", ubicacion: "Ecuador", monto: 1467.91}}
-
-9. "cambié 203.45 por 200 USDT"
-   → {{tipo: "Conversión", moneda: "USD", monto: 203.45, moneda_destino: "USDT", monto_destino: 200}}
-
-10. "cambié 49.71 USDT por 15000 Bs"
-    → {{tipo: "Conversión", moneda: "USDT", monto: 49.71, moneda_destino: "Bs", monto_destino: 15000}}
-
-VALIDACIÓN:
-✓ monto DEBE ser número positivo
-✓ Si tipo="Conversión": moneda_destino y monto_destino NO deben ser null
-✓ descripcion DEBE describir claramente la transacción
-✓ Categoría DEBE ser una de las 12 listadas
-"""
+        # Preparar prompt
+        prompt_content = SYSTEM_PROMPT.replace("{normalized_text}", normalized_text)
 
         response = groq_client.chat.completions.create(
             messages=[
-                {"role": "system", "content": "Eres un asistente que clasifica transacciones financieras. Responde SOLO con JSON válido basado en datos reales."},
-                {"role": "user", "content": prompt}
+                {"role": "system", "content": "Responde siempre en JSON puro."},
+                {"role": "user", "content": prompt_content}
             ],
             model="llama-3.3-70b-versatile",
-            temperature=0.2,  # Más bajo para más precisión
-            max_tokens=400
+            temperature=0.1,
+            max_tokens=500
         )
 
         result_text = response.choices[0].message.content.strip()
@@ -330,44 +158,41 @@ VALIDACIÓN:
         # Limpiar markdown si está presente
         if result_text.startswith('```'):
             result_text = result_text.split('```')[1]
-            if result_text.startswith('json'):
-                result_text = result_text[4:]
+            if result_text.strip().startswith('json'):
+                result_text = result_text.strip()[4:]
             result_text = result_text.strip()
 
+        logger.info(f"Raw JSON response: {result_text}")
         result = json.loads(result_text)
 
         required_keys = ['tipo', 'categoria', 'ubicacion', 'moneda', 'monto', 'descripcion']
-        if not all(key in result for key in required_keys):
-            missing = [key for key in required_keys if key not in result]
-            raise ValueError(f"Respuesta de IA incompleta. Faltan campos: {missing}")
+        # Relaxed check: if key missing, try to fill defaults or warn
+        for key in required_keys:
+            if key not in result:
+                if key == 'ubicacion': result['ubicacion'] = 'Venezuela'
+                elif key == 'moneda': result['moneda'] = 'Bs'
+                else:
+                    raise ValueError(f"Falta campo requerido: {key}")
 
-        # Validar que monto sea un número válido
+        # Validar monto
         try:
             monto = float(result['monto'])
             if monto <= 0:
                 raise ValueError("El monto debe ser positivo")
             result['monto'] = monto
-        except (ValueError, TypeError):
+        except:
             raise ValueError(f"Monto inválido: {result.get('monto')}")
 
-        # Agregar campos opcionales
-        if 'moneda_destino' not in result:
-            result['moneda_destino'] = None
-        if 'monto_destino' not in result:
-            result['monto_destino'] = None
+        # Campos opcionales de crédito
+        result['es_credito'] = result.get('es_credito', False)
+        result['monto_total_credito'] = result.get('monto_total_credito')
+        result['es_pago_cuota'] = result.get('es_pago_cuota', False)
+        result['referencia_deuda'] = result.get('referencia_deuda')
 
-        # Validar conversión
-        if result['tipo'].lower() == 'conversión':
-            if not result.get('moneda_destino') or result.get('moneda_destino') == '':
-                raise ValueError("Para una conversión, debe especificar moneda_destino")
-            if not result.get('monto_destino') or result.get('monto_destino') == 0:
-                raise ValueError("Para una conversión, debe especificar monto_destino")
-            try:
-                result['monto_destino'] = float(result['monto_destino'])
-            except (ValueError, TypeError):
-                raise ValueError(f"monto_destino inválido: {result.get('monto_destino')}")
+        # Campos opcionales de conversión
+        result['moneda_destino'] = result.get('moneda_destino')
+        result['monto_destino'] = result.get('monto_destino')
 
-        logger.info(f"Clasificación exitosa: {result}")
         return result
 
     except Exception as e:
@@ -386,6 +211,32 @@ def save_to_sheets(transaction_data: dict, tasa_usada: float = None) -> bool:
     try:
         spreadsheet = get_or_create_spreadsheet()
         worksheet = spreadsheet.sheet1
+        
+        # 🟢 LÓGICA DE CRÉDITOS Y DEUDAS
+        es_credito = transaction_data.get('es_credito')
+        es_pago_cuota = transaction_data.get('es_pago_cuota')
+        
+        msg_extra = ""
+        
+        if es_credito:
+            total = transaction_data.get('monto_total_credito', 0)
+            inicial = transaction_data.get('monto')
+            desc = transaction_data.get('descripcion')
+            
+            # Crear deuda
+            deuda_id, restante = gestor_deudas.crear_deuda(desc, total, inicial)
+            msg_extra = f"\n📦 Deuda creada: Restan ${restante:.2f}"
+            
+        elif es_pago_cuota:
+            referencia = transaction_data.get('referencia_deuda')
+            monto_pago = transaction_data.get('monto')
+            
+            # Registrar pago
+            success, info = gestor_deudas.registrar_pago_cuota(referencia, monto_pago)
+            if success:
+                msg_extra = f"\n💳 {info}"
+            else:
+                msg_extra = f"\n⚠️ Alerta Deuda: {info}"
 
         fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -409,7 +260,7 @@ def save_to_sheets(transaction_data: dict, tasa_usada: float = None) -> bool:
                 tasa_usada = gestor_tasas.obtener_tasa()
             if not tasa_usada:
                 logger.error("No hay tasa para convertir Bs")
-                return False
+                return False, "Error tasa"
             monto_usd = (monto_original / tasa_usada) * monto_usd_multiplicador
         elif moneda in ["USD", "USDT"]:
             tasa_usada = 1.0
@@ -430,13 +281,122 @@ def save_to_sheets(transaction_data: dict, tasa_usada: float = None) -> bool:
             transaction_data['descripcion']
         ]
 
-        worksheet.append_row(row)
+        # Usar table_range='A1' para evitar problemas con filtros
+        worksheet.append_row(row, table_range="A1")
         logger.info(f"Transacción guardada: {row}")
-        return True
+        
+        # Retornamos True y el mensaje extra
+        return True, msg_extra
 
     except Exception as e:
         logger.error(f"Error al guardar en Sheets: {e}")
-        return False
+        return False, str(e)
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Procesa fotos de facturas"""
+    if not update.message or not update.message.photo:
+        return
+
+    await update.message.reply_text("📸 Analizando factura, dame unos segundos...")
+
+    try:
+        # 1. Obtener la foto de mayor resolución
+        photo_file = await update.message.photo[-1].get_file()
+        
+        # 2. Descargar imagen en memoria
+        from io import BytesIO
+        img_buffer = BytesIO()
+        await photo_file.download_to_memory(out=img_buffer)
+        img_buffer.seek(0)
+        
+        # 3. Encode base64
+        base64_image = base64.b64encode(img_buffer.read()).decode('utf-8')
+        
+        # 4. Enviar a Groq Vision
+        prompt_vision = """Analiza esta imagen de factura/recibo. Extrae la información y responde SOLO con un JSON válido.
+        
+        ESTRUCTURA JSON:
+        {
+            "tipo": "Egreso",
+            "categoria": "una de: Alimentación, Transporte, Salud, Servicios, Compras, Limpieza, Otro",
+            "ubicacion": "Ecuador" o "Venezuela" (inferir por moneda o dirección),
+            "moneda": "USD" o "Bs",
+            "monto": número (total a pagar),
+            "descripcion": "breve descripción de lo comprado (nombre del local + items principales)"
+        }
+        
+        Si no es una factura clara, responde con error en el JSON o un JSON con campos nulos.
+        """
+        
+        response = groq_client.chat.completions.create(
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt_vision},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}",
+                            },
+                        },
+                    ],
+                }
+            ],
+            model="llama-3.2-11b-vision-preview",
+            temperature=0.1,
+            max_tokens=500,
+        )
+
+        result_text = response.choices[0].message.content.strip()
+        
+        # Limpiar markdown
+        if result_text.startswith('```'):
+            result_text = result_text.split('```')[1]
+            if result_text.strip().startswith('json'):
+                result_text = result_text.strip()[4:]
+            result_text = result_text.strip()
+            
+        logger.info(f"Vision JSON: {result_text}")
+        transaction = json.loads(result_text)
+        
+        # Validar
+        if not transaction.get('monto') or not transaction.get('moneda'):
+            await update.message.reply_text("❌ No pude leer bien el monto o la moneda de la foto. Intenta con texto.")
+            return
+
+        # 5. Guardar
+        # Obtener tasa si es Bs
+        tasa_para_guardar = None
+        if transaction['moneda'] == "Bs":
+            tasa_para_guardar = gestor_tasas.obtener_tasa()
+
+        success, msg_extra = save_to_sheets(transaction, tasa_para_guardar)
+        
+        if success:
+            # Calcular USD equivalente
+            if transaction['moneda'] == "Bs" and tasa_para_guardar:
+                monto_usd = transaction['monto'] / tasa_para_guardar
+            else:
+                monto_usd = transaction['monto']
+                
+            confirmation = f"""📸 ¡Factura Procesada!
+
+📍 Ubicación: {transaction['ubicacion']}
+🏷️ Categoría: {transaction['categoria']}
+💱 Moneda: {transaction['moneda']}
+💵 Monto: {transaction['monto']:.2f}
+📝 Desc: {transaction['descripcion']}
+
+✅ Guardado en Google Sheets"""
+            await update.message.reply_text(confirmation)
+        else:
+             await update.message.reply_text(f"❌ Error al guardar: {msg_extra}")
+
+    except Exception as e:
+        logger.error(f"Error procesando foto: {e}")
+        await update.message.reply_text("❌ Error analizando la imagen. Intenta de nuevo o envía el texto.")
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando /start"""
@@ -588,6 +548,20 @@ async def comando_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error en comando /saldo: {e}")
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
+async def comando_deudas(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /deudas - Ver resumen de deudas"""
+    try:
+        if not gestor_deudas:
+            await update.message.reply_text("❌ Error: Gestor de deudas no inicializado")
+            return
+            
+        resumen = gestor_deudas.obtener_resumen()
+        await update.message.reply_text(resumen)
+        
+    except Exception as e:
+        logger.error(f"Error en comando /deudas: {e}")
+        await update.message.reply_text(f"❌ Error interno: {e}")
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Procesa mensajes de transacciones"""
     if not update.message or not update.message.text:
@@ -633,9 +607,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'descripcion': f'Recibido de conversión ({transaction["moneda"]})'
             }
 
-            # Guardar ambas transacciones
-            success_egreso = save_to_sheets(egreso_data)
-            success_ingreso = save_to_sheets(ingreso_data)
+            # Guardar ambas transacciones (Unpack tuple)
+            success_egreso, _ = save_to_sheets(egreso_data)
+            success_ingreso, _ = save_to_sheets(ingreso_data)
 
             if success_egreso and success_ingreso:
                 # Calcular comisión
@@ -676,7 +650,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if transaction['moneda'] == "Bs":
             tasa_para_guardar = gestor_tasas.obtener_tasa()
 
-        success = save_to_sheets(transaction, tasa_para_guardar)
+        success, msg_extra = save_to_sheets(transaction, tasa_para_guardar)
 
         if success:
             # Determinar emoji según tipo
@@ -702,12 +676,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 💵 Monto: {transaction['monto']:.2f}
 📊 USD Equivalente: ${monto_usd:.2f}
 📝 Descripción: {transaction['descripcion']}
+{msg_extra}
 
 ✅ Guardado en Google Sheets"""
 
             await update.message.reply_text(confirmation)
         else:
-            await update.message.reply_text("❌ Error al guardar en Google Sheets. Intenta de nuevo.")
+            error_msg = msg_extra if msg_extra else "Intenta de nuevo."
+            await update.message.reply_text(f"❌ Error al guardar: {error_msg}")
 
     except Exception as e:
         logger.error(f"Error procesando mensaje: {e}")
@@ -718,6 +694,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• 'ingreso 2000 sueldo'\n"
             "• 'gasté 15 usd transporte' (o: 'gaste')\n"
             "• 'cobré 500 freelance' (o: 'cobre')\n\n"
+            "CRÉDITO:\n"
+            "• 'compre telefono 200 pagando 50 inicial'\n"
+            "• 'pago cuota telefono 25'\n\n"
             "CONVERSIONES:\n"
             "• 'cambié 125 por 120' (USD→USDT, o: 'cambie')\n"
             "• 'cambié 126.5 por 125' (o: 'cambie')\n"
@@ -841,6 +820,9 @@ def main():
 
     logger.info("Iniciando bot de finanzas personales (v2 con múltiples monedas)...")
 
+    # Iniciar servidor web para Replit
+    keep_alive.keep_alive()
+
     application = Application.builder().token(TELEGRAM_TOKEN).build()
 
     # Comandos
@@ -850,8 +832,10 @@ def main():
     application.add_handler(CommandHandler("settasa", comando_settasa))
     application.add_handler(CommandHandler("saldo", comando_saldo))
     application.add_handler(CommandHandler("resumen", comando_resumen))
+    application.add_handler(CommandHandler("deudas", comando_deudas))
 
     # Mensajes
+    application.add_handler(MessageHandler(filters.PHOTO, handle_photo)) # Nuevo handler para fotos
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Error handler
