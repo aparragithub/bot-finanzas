@@ -360,7 +360,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "categoria": "Alimentación, Transporte, Salud, Servicios, Compras, Limpieza u Otro",
             "ubicacion": "Ecuador" o "Venezuela" (inferir por moneda: Bs=Venezuela, USD=Ecuador),
             "moneda": "USD" o "Bs",
-            "monto": número (EL VALOR FINAL A PAGAR. Busca "TOTAL" o "TOTAL A PAGAR". IGNORA "SUBTOTAL", "Monto Neto", "Base Imponible". Si hay varios, toma el mayor),
+            "monto": número (CRÍTICO: Busca el "TOTAL A PAGAR" final. DEBE INCLUIR IMPUESTOS (IVA/IGTF). Ignora "Subtotal" o "Base Imponible". Si hay varios montos, el Total suele ser el MAYOR. Ej: Subtotal: 100, IVA: 16, Total: 116 -> USA 116),
             "descripcion": "nombre del local + items principales",
             "fecha": "DD/MM/YYYY" o null (fecha de emisión),
             "tasa_especifica": número o null (solo si aparece explícitamente la tasa de cambio)
