@@ -385,7 +385,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 from PIL import Image
                 image = Image.open(img_buffer)
                 
-                model = genai.GenerativeModel('gemini-1.5-flash')
+                model = genai.GenerativeModel('models/gemini-1.5-flash')
                 response = model.generate_content([prompt_vision, image])
                 result_text = response.text.strip()
                 
