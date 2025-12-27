@@ -12,6 +12,8 @@ ESTRUCTURA JSON REQUERIDA (Extendida):
     "moneda": "USD" o "Bs" o "USDT",
     "monto": número positivo (el monto que sale del bolsillo HOY),
     "descripcion": string breve,
+    "fecha": string (FORMATO "DD/MM/YYYY" si se especifica, si es "ayer" calcula la fecha, si no: null),
+    "tasa_especifica": número o null (si se menciona explícitamente "tasa 55" o similar),
     // CAMPOS PARA CONVERSIONES
     "moneda_destino": string o null,
     "monto_destino": número o null,

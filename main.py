@@ -246,7 +246,27 @@ def save_to_sheets(transaction_data: dict, tasa_usada: float = None) -> bool:
             else:
                 msg_extra = f"\n⚠️ Alerta Deuda: {info}"
 
-        fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+        # 📅 FECHA: Usar la provista o la actual
+        fecha_str = transaction_data.get('fecha')
+        if fecha_str:
+            # Intentar parsear fecha
+            try:
+                # Si viene "ayer"
+                if fecha_str.lower() == 'ayer':
+                    fecha_dt = datetime.now() - datetime.timedelta(days=1)
+                elif fecha_str.lower() == 'hoy':
+                     fecha_dt = datetime.now()
+                else:
+                    # Tratar de parsear DD/MM/YYYY
+                    fecha_dt = datetime.strptime(fecha_str, "%d/%m/%Y")
+                fecha = fecha_dt.strftime("%Y-%m-%d %H:%M:%S")
+            except:
+                # Fallback
+                fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # Convertir a USD
         monto_original = transaction_data['monto']
@@ -330,7 +350,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "ubicacion": "Ecuador" o "Venezuela" (inferir por moneda o dirección),
             "moneda": "USD" o "Bs",
             "monto": número (total a pagar),
-            "descripcion": "breve descripción de lo comprado (nombre del local + items principales)"
+            "descripcion": "breve descripción de lo comprado (nombre del local + items principales)",
+            "fecha": "DD/MM/YYYY" o null (fecha del recibo),
+            "tasa_especifica": número o null (solo si aparece explícitamente la tasa de cambio)
         }
         
         Si no es una factura clara, responde con error en el JSON o un JSON con campos nulos.
@@ -377,7 +399,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Obtener tasa si es Bs
         tasa_para_guardar = None
         if transaction['moneda'] == "Bs":
-            tasa_para_guardar = gestor_tasas.obtener_tasa()
+            tasa_para_guardar = transaction.get('tasa_especifica') or gestor_tasas.obtener_tasa()
 
         success, msg_extra = save_to_sheets(transaction, tasa_para_guardar)
         
@@ -656,7 +678,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Obtener tasa para conversión si es Bs
         tasa_para_guardar = None
         if transaction['moneda'] == "Bs":
-            tasa_para_guardar = gestor_tasas.obtener_tasa()
+            tasa_para_guardar = transaction.get('tasa_especifica') or gestor_tasas.obtener_tasa()
 
         success, msg_extra = save_to_sheets(transaction, tasa_para_guardar)
 
