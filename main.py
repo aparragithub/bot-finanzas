@@ -259,8 +259,9 @@ def save_to_sheets(transaction_data: dict, tasa_usada: float = None) -> bool:
                 elif fecha_str.lower() == 'hoy':
                      fecha_dt = datetime.now()
                 else:
-                    # Tratar de parsear DD/MM/YYYY
-                    fecha_dt = datetime.strptime(fecha_str, "%d/%m/%Y")
+                    # Tratar de parsear DD/MM/YYYY o DD-MM-YYYY
+                    fecha_limpia = fecha_str.replace('-', '/')
+                    fecha_dt = datetime.strptime(fecha_limpia, "%d/%m/%Y")
                 fecha = fecha_dt.strftime("%Y-%m-%d %H:%M:%S")
             except:
                 # Fallback
@@ -359,10 +360,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "categoria": "Alimentación, Transporte, Salud, Servicios, Compras, Limpieza u Otro",
             "ubicacion": "Ecuador" o "Venezuela" (inferir por moneda: Bs=Venezuela, USD=Ecuador),
             "moneda": "USD" o "Bs",
-            "monto": número (BUSCA EL "TOTAL" o "TOTAL A PAGAR". NO uses el Subtotal. Debe ser el monto final con impuestos),
+            "monto": número (EL VALOR FINAL A PAGAR. Busca "TOTAL" o "TOTAL A PAGAR". IGNORA "SUBTOTAL", "Monto Neto", "Base Imponible". Si hay varios, toma el mayor),
             "descripcion": "nombre del local + items principales",
-            "fecha": "DD/MM/YYYY" o null (Busca la fecha de emisión de la factura),
-            "tasa_especifica": número o null (solo si aparece explícitamente la tasa de cambio en la factura)
+            "fecha": "DD/MM/YYYY" o null (fecha de emisión),
+            "tasa_especifica": número o null (solo si aparece explícitamente la tasa de cambio)
         }
         
         Si no es claro, responde con error o campos nulos.
