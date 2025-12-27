@@ -351,7 +351,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     ],
                 }
             ],
-            model=os.getenv('GROQ_VISION_MODEL', 'llama-3.2-90b-vision-preview'),
+            model=os.getenv('GROQ_VISION_MODEL', 'meta-llama/llama-4-scout-17b-16e-instruct'),
             temperature=0.1,
             max_tokens=500,
         )
