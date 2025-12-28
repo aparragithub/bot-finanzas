@@ -197,34 +197,63 @@ def save_to_sheets(transaction_data: dict, tasa_usada: float = None) -> bool:
 
         # 🟢 LÓGICA CASHEA (V3)
         if transaction_data.get('es_cashea'):
-            texto = transaction_data.get('raw_text', '')
+            texto = transaction_data.get('raw_text', '').lower()
             
             numeros = re.findall(r'\d+\.?\d*', texto)
             if not numeros: return False, "No encontré el monto de la compra"
+            # Asumimos que el primer número es el monto total si no está especificado
             monto_total = float(numeros[0])
             
             linea = "cotidiana" if "cotidiana" in texto else "principal"
             
-            match_inicial = re.search(r'inicial\s+(\d+)', texto)
-            if match_inicial:
-                inicial_usuario = float(match_inicial.group(1))
-                simulacion = gestor_deudas.simular_compra_cashea(monto_total, linea)
+            # Detectar Fuente (Cashea, Binance, etc)
+            fuentes = ["binance", "mercantil", "banesco", "zelle", "efectivo", "cashea"]
+            fuente_usada = "Cashea" # Default
+            for f in fuentes:
+                if f in texto:
+                    fuente_usada = f.capitalize()
+                    break
+
+            # 1. Buscar porcentaje explícito (ej: "40% inicial" o "inicial 40%")
+            match_porcentaje = re.search(r'(\d+(?:\.\d+)?)%\s*inicial|inicial\s*(\d+(?:\.\d+)?)%', texto)
+            # 2. Buscar monto fijo explícito (ej: "inicial 50")
+            match_fijo = re.search(r'inicial\s+(\d+(?:\.\d+)?)', texto)
+            
+            inicial_usuario = None
+            
+            if match_porcentaje:
+                # Extraer el grupo que no sea None
+                pct_str = match_porcentaje.group(1) or match_porcentaje.group(2)
+                pct = float(pct_str)
+                inicial_usuario = monto_total * (pct / 100)
+            elif match_fijo:
+                inicial_usuario = float(match_fijo.group(1))
+
+            # Simulación y Validación
+            simulacion = gestor_deudas.simular_compra_cashea(monto_total, linea)
+            
+            if inicial_usuario is not None:
                 if simulacion and simulacion['es_ajustado'] and inicial_usuario < simulacion['inicial_a_pagar']:
                     msg_extra = f"\n⚠️ OJO: Tu inicial manual (${inicial_usuario}) es menor a la requerida por límite (${simulacion['inicial_a_pagar']:.2f})."
                 monto_inicial_real = inicial_usuario
             else:
-                simulacion = gestor_deudas.simular_compra_cashea(monto_total, linea)
                 if not simulacion: return False, "Error simulando crédito"
                 monto_inicial_real = simulacion['inicial_a_pagar']
                 if simulacion['es_ajustado']:
                     msg_extra = f"\n⚠️ Inicial Ajustada Automáticamente: ${monto_inicial_real:.2f}"
 
             desc = f"Cashea: {transaction_data.get('descripcion', 'Compra')}"
-            gestor_deudas.crear_deuda(desc, monto_total, monto_inicial_real, tipo=f"Cashea ({linea})")
+            gestor_deudas.crear_deuda(
+                descripcion=desc, 
+                monto_total=monto_total, 
+                monto_inicial=monto_inicial_real, 
+                tipo=f"Cashea ({linea})",
+                fuente=fuente_usada
+            )
             
             transaction_data['monto'] = monto_inicial_real
             transaction_data['descripcion'] = f"{desc} (Inicial)"
-            msg_extra += f"\n📦 Deuda Cashea creada. Resta: ${monto_total - monto_inicial_real:.2f}"
+            msg_extra += f"\n📦 Deuda {fuente_usada} creada. Resta: ${monto_total - monto_inicial_real:.2f}"
 
         elif transaction_data.get('es_credito'):
              gestor_deudas.crear_deuda(transaction_data['descripcion'], transaction_data['monto_total_credito'], transaction_data['monto'])
@@ -372,96 +401,103 @@ async def comando_cashea(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Error: {e}")
 
 
+
 async def comando_importardeuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Importa deuda con parsing inteligente.
-    Soporta: /importardeuda [Texto libre con monto, cuotas y fecha]
-    Ej: /importardeuda 56 usd 1 cuota Monitor 30/12/2025
+    Importa deuda con parsing inteligente y desglose.
+    Soporta: /importardeuda [Fuente?] [Monto] [Cuotas] [Desc] [Fecha]
+    Ej: /importardeuda Cashea 56 usd 2 cuota Monitor 30/12/2025
     """
     try:
         args = context.args
         if not args:
-            await update.message.reply_text("❌ Uso: `/importardeuda [Monto] [Cuotas opcional] [Desc] [Fecha opcional]`")
+            await update.message.reply_text("❌ Uso: `/importardeuda 56 usd 2 cuotas Monitor Cashea`")
             return
             
         full_text = " ".join(args)
         
-        # 1. Extraer FECHA (DD/MM/YYYY o hoy/ayer)
+        # 1. Extraer FECHA
         fecha_match = re.search(r'\b(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\b', full_text)
-        prox_venc = datetime.now().strftime("%Y-%m-%d") # Default hoy
-        
+        prox_venc = datetime.now().strftime("%Y-%m-%d")
         if fecha_match:
-            fecha_str = fecha_match.group(1).replace('-', '/')
             try:
-                dt = datetime.strptime(fecha_str, "%d/%m/%Y")
+                dt = datetime.strptime(fecha_match.group(1).replace('-', '/'), "%d/%m/%Y")
                 prox_venc = dt.strftime("%Y-%m-%d")
-                full_text = full_text.replace(fecha_match.group(0), "") # Remover fecha
+                full_text = full_text.replace(fecha_match.group(0), "")
             except: pass
         elif "hoy" in full_text.lower():
             full_text = re.sub(r'\bhoy\b', '', full_text, flags=re.IGNORECASE)
-        elif "ayer" in full_text.lower():
-            prox_venc = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-            full_text = re.sub(r'\bayer\b', '', full_text, flags=re.IGNORECASE)
-
-        # 2. Extraer CUOTAS (N cuotas o simplemente segundo número)
+        
+        # 2. Extraer CUOTAS
         num_cuotas = 1
-        # Buscar patrón explícito "X cuotas"
         cuotas_match = re.search(r'\b(\d+)\s*(?:cuota|plazo|mes|pago)s?\b', full_text, re.IGNORECASE)
         if cuotas_match:
              num_cuotas = int(cuotas_match.group(1))
              full_text = full_text.replace(cuotas_match.group(0), "")
         else:
-             # Si no hay "cuotas", buscar si hay DOS números separados. asumimos 1ro=Monto, 2do=Cuotas
              numeros = re.findall(r'\b\d+(?:\.\d+)?\b', full_text)
              if len(numeros) >= 2:
-                 # Si el segundo número es entero pequeño (<24), asumimos que son cuotas
-                 posible_cuota = float(numeros[1])
-                 if posible_cuota.is_integer() and posible_cuota < 24:
-                     num_cuotas = int(posible_cuota)
-                     # Remover solo la primera ocurrencia de ese número para no borrar el precio si son iguales
-                     full_text = re.sub(r'\b' + str(int(posible_cuota)) + r'\b', '', full_text, count=1)
+                 pos = float(numeros[1])
+                 if pos.is_integer() and pos < 24:
+                     num_cuotas = int(pos)
+                     full_text = re.sub(r'\b' + str(int(pos)) + r'\b', '', full_text, count=1)
 
-        # 3. Extraer MONTO (Primer número que quede)
+        # 3. Extraer MONTO
         monto_match = re.search(r'\b\d+(?:\.\d+)?\b', full_text)
         if not monto_match:
-            await update.message.reply_text("❌ No encontré el monto de la deuda.")
+            await update.message.reply_text("❌ Falta el monto.")
             return
-            
         monto_cuota = float(monto_match.group(0))
         full_text = full_text.replace(monto_match.group(0), "", 1)
         
-        # 4. Limpieza Final (Descripción)
-        # Remover palabras basura
-        basura = ['usd', 'bs', 'pesos', 'dolares', 'bolivares', '$', '€']
+        # 4. Extraer FUENTE (Detectar palabras clave)
+        fuentes_conocidas = ["cashea", "binance", "banesco", "mercantil", "zelle", "pagomovil", "tdc"]
+        fuente_detectada = "Binance" # Default
+        
+        for f in fuentes_conocidas:
+            if re.search(r'\b' + f + r'\b', full_text, re.IGNORECASE):
+                fuente_detectada = f.capitalize()
+                full_text = re.sub(r'\b' + f + r'\b', '', full_text, flags=re.IGNORECASE)
+                break
+        
+        # 5. Limpieza Final
+        basura = ['usd', 'bs', 'pesos', 'dolares', 'bolivares', '$', '€', 'de', 'del', 'la', 'el']
         for b in basura:
             full_text = re.sub(r'\b' + re.escape(b) + r'\b', '', full_text, flags=re.IGNORECASE)
             
         descripcion = re.sub(r'\s+', ' ', full_text).strip()
-        if not descripcion: descripcion = "Deuda Importada"
-        
-        # Calcular Totales
-        monto_total_deuda = monto_cuota * num_cuotas
-        linea = "Cotidiana" if num_cuotas == 1 else "Principal"
-        
+        if not descripcion: descripcion = "Importado"
+
         if not gestor_deudas: get_or_create_spreadsheet()
-        
-        gestor_deudas.crear_deuda(
-            descripcion=f"Imp: {descripcion}", 
-            monto_total=monto_total_deuda, 
-            monto_inicial=0,
-            tipo=f"Cashea ({linea}) - Importado",
-            proximo_vencimiento=prox_venc
-        )
-        
-        msg = f"✅ **Deuda Importada**\n"
-        msg += f"📦 {descripcion}\n"
-        msg += f"🔢 {num_cuotas} cuotas de ${monto_cuota}\n"
-        msg += f"📅 Vence: {prox_venc}"
+
+        # Usar la nueva lógica de plan de cuotas o simple
+        if num_cuotas > 1:
+            linea = "Principal"
+            success, msg_plan = gestor_deudas.crear_plan_cuotas(
+                descripcion=descripcion,
+                monto_cuota=monto_cuota,
+                num_cuotas=num_cuotas,
+                fecha_inicio=prox_venc,
+                linea=linea,
+                fuente=fuente_detectada
+            )
+            msg = f"✅ **Plan Registrado ({fuente_detectada})**\n{msg_plan}\n📅 Inicio: {prox_venc}"
+        else:
+            # Una sola cuota
+            gestor_deudas.crear_deuda(
+                descripcion=f"Imp: {descripcion}",
+                monto_total=monto_cuota,
+                monto_inicial=0,
+                tipo=f"Deuda ({fuente_detectada})",
+                proximo_vencimiento=prox_venc,
+                fuente=fuente_detectada
+            )
+            msg = f"✅ **Deuda Registrada ({fuente_detectada})**\n📦 {descripcion}\n� ${monto_cuota} (1 cuota)\n📅 Vence: {prox_venc}"
         
         await update.message.reply_text(msg, parse_mode="Markdown")
 
     except Exception as e:
-        await update.message.reply_text(f"❌ Error interno: {e}")
+        await update.message.reply_text(f"❌ Error: {e}")
 
 
 

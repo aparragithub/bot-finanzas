@@ -10,7 +10,8 @@ class GestorDeudas:
     """
     
     NOMBRE_HOJA = "Deudas"
-    ENCABEZADOS = ["ID", "Fecha", "Descripción", "Monto Total", "Pagado", "Restante", "Estado", "Tipo", "Próximo Vencimiento"]
+    # Actualizamos encabezados con Fuente
+    ENCABEZADOS = ["ID", "Fecha", "Descripción", "Monto Total", "Pagado", "Restante", "Estado", "Tipo", "Próximo Vencimiento", "Fuente"]
 
     # Límites de Crédito (Configurables)
     LIMITE_COTIDIANA = 150.0  # 1 Cuota
@@ -21,13 +22,18 @@ class GestorDeudas:
         self._inicializar_hoja()
 
     def _inicializar_hoja(self):
-        """Crea la hoja si no existe y pone encabezados"""
+        """Crea la hoja si no existe y asegura encabezados correctos"""
         try:
             try:
                 self.worksheet = self.spreadsheet.worksheet(self.NOMBRE_HOJA)
+                # Verificar si faltan columnas (Headers fix)
+                current_headers = self.worksheet.row_values(1)
+                if len(current_headers) < len(self.ENCABEZADOS):
+                    logger.info("Actualizando encabezados faltantes...")
+                    self.worksheet.update('A1:J1', [self.ENCABEZADOS])
             except gspread.WorksheetNotFound:
-                self.worksheet = self.spreadsheet.add_worksheet(title=self.NOMBRE_HOJA, rows=100, cols=10)
-                self.worksheet.update('A1:I1', [self.ENCABEZADOS])
+                self.worksheet = self.spreadsheet.add_worksheet(title=self.NOMBRE_HOJA, rows=100, cols=11)
+                self.worksheet.update('A1:J1', [self.ENCABEZADOS])
                 logger.info(f"Hoja '{self.NOMBRE_HOJA}' creada")
         except Exception as e:
             logger.error(f"Error inicializando hoja de deudas: {e}")
@@ -35,6 +41,8 @@ class GestorDeudas:
     def obtener_credito_disponible(self):
         """Calcula cuánto crédito queda disponible en ambas líneas"""
         try:
+            # Re-leer hoja para tener datos frescos
+            self.worksheet = self.spreadsheet.worksheet(self.NOMBRE_HOJA)
             todas = self.worksheet.get_all_records()
             pendientes = [d for d in todas if str(d.get("Estado")).lower() != "pagado"]
             
@@ -108,17 +116,17 @@ class GestorDeudas:
             "mensaje": mensaje_alerta
         }
 
-    def crear_deuda(self, descripcion: str, monto_total: float, monto_inicial: float, tipo: str = "Normal", fecha_compra: str = None, proximo_vencimiento: str = None):
-        """Registra una nueva deuda con soporte para tipos (Cashea/Normal) y vencimiento manual"""
+    def crear_deuda(self, descripcion: str, monto_total: float, monto_inicial: float, tipo: str = "Normal", fecha_compra: str = None, proximo_vencimiento: str = None, fuente: str = "Binance"):
+        """Registra una nueva deuda (single row)"""
         try:
             if not fecha_compra:
                 fecha_compra = datetime.now().strftime("%Y-%m-%d")
                 
-            deuda_id = f"DEUDA-{int(datetime.now().timestamp())}"
+            deuda_id = f"DEUDA-{int(datetime.now().timestamp() * 1000)}" # ID único ms
             restante = monto_total - monto_inicial
             estado = "Pendiente" if restante > 0.01 else "Pagado"
 
-            # Calcular próx vencimiento (14 días si es Cashea)
+            # Calcular próx vencimiento (14 días si es Cashea y no se da manual)
             if proximo_vencimiento:
                 prox_venc = proximo_vencimiento
             elif "cashea" in tipo.lower() or "cotidiana" in tipo.lower():
@@ -136,16 +144,52 @@ class GestorDeudas:
                 restante,
                 estado,
                 tipo,
-                prox_venc
+                prox_venc,
+                fuente
             ]
             
             self.worksheet.append_row(row, table_range="A1")
-            logger.info(f"Deuda creada: {descripcion} ({tipo}) - Restante: {restante}")
+            logger.info(f"Deuda creada: {descripcion}")
             return deuda_id, restante
 
         except Exception as e:
             logger.error(f"Error creando deuda: {e}")
             return None, 0
+
+    def crear_plan_cuotas(self, descripcion: str, monto_cuota: float, num_cuotas: int, fecha_inicio: str, linea: str, fuente: str = "Binance"):
+        """
+        Crea MÚLTIPLES deudas separadas, una por cada cuota pendiente.
+        Intervalo: 14 días entre cada una.
+        """
+        try:
+            fecha_base = datetime.strptime(fecha_inicio, "%Y-%m-%d")
+            total_creada = 0
+            
+            for i in range(num_cuotas):
+                fecha_venc = (fecha_base + timedelta(days=14 * i)).strftime("%Y-%m-%d")
+                num_actual = i + 1
+                
+                # Descripción única: "Monitor (Cuota 1/3)"
+                desc_cuota = f"{descripcion} (Cuota {num_actual}/{num_cuotas})"
+                
+                # Para la hoja de deudas, cada cuota es una "Micro deuda"
+                # Monto Total = Monto Cuota
+                # Inicial = 0 (Porque es lo que falta por pagar)
+                # Restante = Monto Cuota
+                self.crear_deuda(
+                    descripcion=desc_cuota,
+                    monto_total=monto_cuota, # Cada row es 1 cuota
+                    monto_inicial=0,
+                    tipo=f"Cashea ({linea}) - Importado",
+                    proximo_vencimiento=fecha_venc,
+                    fuente=fuente
+                )
+                total_creada += monto_cuota
+                
+            return True, f"Se crearon {num_cuotas} cuotas totalizando ${total_creada:.2f}"
+            
+        except Exception as e:
+            return False, f"Error creando plan: {e}"
 
     def registrar_pago_cuota(self, referencia: str, monto_pago: float):
         """Abonar a una deuda existente"""
@@ -180,15 +224,18 @@ class GestorDeudas:
             nuevo_estado = "Pagado" if nuevo_restante <= 0.01 else "Pendiente"
             if nuevo_restante < 0: nuevo_restante = 0
             
-            # Actualizar vencimiento si es Cashea y sigue pendiente
+            # Actualizar vencimiento si es Cashea y sigue pendiente (Solo si no es importada fija)
             nuevo_venc = prox_venc_actual
-            if nuevo_estado == "Pendiente" and prox_venc_actual:
-                 # Sumar 14 días al vencimiento actual
+            # En V3, si son cuotas separadas, NO avanzamos la fecha automáticamente
+            # Porque cada cuota es una row distinta.
+            # Solo avanzamos fecha si es una deuda "agrupada".
+            tipo = str(candidato.get("Tipo", "")).lower()
+            if "importado" not in tipo and nuevo_estado == "Pendiente" and prox_venc_actual:
+                 # Sumar 14 días al vencimiento actual (Legacy logic para deudas agrupadas)
                  try:
                      f_venc = datetime.strptime(prox_venc_actual, "%Y-%m-%d")
                      nuevo_venc = (f_venc + timedelta(days=14)).strftime("%Y-%m-%d")
-                 except:
-                     pass
+                 except: pass
 
             # Fila en hoja (1-based + header)
             fila = candidato_idx + 2
@@ -196,57 +243,49 @@ class GestorDeudas:
             # Actualizar E(Pagado), F(Restante), G(Estado), I(Prox Venc)
             # A=1, B=2, C=3, D=4, E=5, F=6, G=7, H=8, I=9
             self.worksheet.update(values=[[nuevo_pagado, nuevo_restante, nuevo_estado]], range_name=f"E{fila}:G{fila}")
-            self.worksheet.update(values=[[nuevo_venc]], range_name=f"I{fila}") # Actualizar vencimiento separadamente
+            self.worksheet.update(values=[[nuevo_venc]], range_name=f"I{fila}")
             
-            return True, f"✅ Abonado ${monto_pago} a '{candidato['Descripción']}'. Resta: ${nuevo_restante:.2f}\n📅 Prox Venc: {nuevo_venc}"
+            return True, f"✅ Abonado ${monto_pago} a '{candidato['Descripción']}'. Resta: ${nuevo_restante:.2f}"
 
         except Exception as e:
             logger.error(f"Error registrando pago: {e}")
             return False, f"Error: {str(e)}"
 
     def obtener_resumen(self):
-        """Retorna resumen de deudas, líneas de crédito y custodias"""
+        """Retorna resumen visual"""
         try:
+            self.worksheet = self.spreadsheet.worksheet(self.NOMBRE_HOJA)
             creditos = self.obtener_credito_disponible()
             todas = self.worksheet.get_all_records()
             pendientes = [d for d in todas if str(d.get("Estado")).lower() != "pagado"]
             
-            msg = "💳 **ESTADO DE CRÉDITO (CASHEA)**\n"
-            msg += f"• **Principal:** Disp ${creditos['principal']['disponible']:.2f} / ${self.LIMITE_PRINCIPAL}\n"
-            msg += f"• **Cotidiana:** Disp ${creditos['cotidiana']['disponible']:.2f} / ${self.LIMITE_COTIDIANA}\n\n"
+            msg = "💳 **ESTADO DE CRÉDITO**\n"
+            msg += f"• Principal: ${creditos['principal']['disponible']:.2f}\n"
+            msg += f"• Cotidiana: ${creditos['cotidiana']['disponible']:.2f}\n\n"
             
             if not pendientes:
-                msg += "✅ **No tienes deudas pendientes.**"
-                return msg
-                
-            deudas_reales = []
-            custodias = []
-            
-            for d in pendientes:
-                tipo = str(d.get("Tipo", "")).lower()
-                if "custodia" in tipo:
-                    custodias.append(d)
-                else:
-                    deudas_reales.append(d)
+                return msg + "✅ **Sin deudas.**"
 
-            total_deuda = 0
-            if deudas_reales:
-                msg += "📉 **DEUDAS POR PAGAR**\n"
-                for d in deudas_reales:
+            custodias = [d for d in pendientes if "custodia" in str(d.get("Tipo", "")).lower()]
+            deudas = [d for d in pendientes if d not in custodias]
+
+            if deudas:
+                msg += "📉 **POR PAGAR**\n"
+                total = 0
+                for d in deudas:
                     restante = float(d.get("Restante", 0))
-                    total_deuda += restante
+                    total += restante
                     venc = d.get("Próximo Vencimiento", "N/A")
-                    msg += f"• {d['Descripción']}: **${restante:.2f}** (Vence: {venc})\n"
-                msg += f"💰 **Total Deuda:** ${total_deuda:.2f}\n"
+                    fuente = d.get("Fuente", "")
+                    fuente_str = f" ({fuente})" if fuente else ""
+                    msg += f"• {d['Descripción']}{fuente_str}: **${restante:.2f}** ({venc})\n"
+                msg += f"💰 Total: ${total:.2f}\n"
 
             if custodias:
-                total_custodia = sum(float(c.get("Restante", 0)) for c in custodias)
-                msg += "\n🔐 **FONDOS EN CUSTODIA (Terceros)**\n"
+                msg += "\n🔐 **CUSTODIA**\n"
                 for c in custodias:
-                    msg += f"• {c['Descripción']}: ${float(c.get('Restante', 0)):.2f}\n"
-                msg += f"🏦 **Total Custodia:** ${total_custodia:.2f}\n"
+                    msg += f"• {c['Descripción']}: ${c.get('Restante')}\n"
             
             return msg
-            
         except Exception as e:
-            return f"Error leyendo deudas: {e}"
+            return f"Error: {e}"
