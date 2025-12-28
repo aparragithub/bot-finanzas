@@ -43,7 +43,8 @@ class GestorDeudas:
         try:
             # Re-leer hoja para tener datos frescos
             self.worksheet = self.spreadsheet.worksheet(self.NOMBRE_HOJA)
-            todas = self.worksheet.get_all_records()
+            # Utilizar numericise_ignore=['all'] para evitar que GSheets parseé "50,65" como 5065 (miles)
+            todas = self.worksheet.get_all_records(numericise_ignore=['all'])
             pendientes = [d for d in todas if str(d.get("Estado")).lower() != "pagado"]
             
             uso_cotidiana = 0
@@ -192,6 +193,64 @@ class GestorDeudas:
         except Exception as e:
             return False, f"Error creando plan: {e}"
 
+    def registrar_pago_cuota(self, referencia: str, monto_pago: float):
+        """Abonar a una deuda existente"""
+        try:
+            # Utilizar numericise_ignore=['all'] para evitar que GSheets parseé "50,65" como 5065
+            todas = self.worksheet.get_all_records(numericise_ignore=['all'])
+            candidato = None
+            candidato_idx = -1
+            
+            referencia = referencia.lower()
+            
+            for i, deuda in enumerate(todas):
+                desc = str(deuda.get("Descripción", "")).lower()
+                estado = str(deuda.get("Estado", "")).lower()
+                if estado != "pagado" and referencia in desc:
+                    candidato = deuda
+                    candidato_idx = i
+                    break
+            
+            if not candidato:
+                return False, f"No encontré deuda pendiente con '{referencia}'"
+
+            try:
+                # Usar _parse_float para leer los valores string
+                pagado_anterior = self._parse_float(candidato.get("Pagado", 0))
+                total = self._parse_float(candidato.get("Monto Total", 0))
+                prox_venc_actual = candidato.get("Próximo Vencimiento", "")
+            except:
+                return False, "Error leyendo datos numéricos"
+
+            nuevo_pagado = pagado_anterior + monto_pago
+            nuevo_restante = total - nuevo_pagado
+            
+            nuevo_estado = "Pagado" if nuevo_restante <= 0.01 else "Pendiente"
+            if nuevo_restante < 0: nuevo_restante = 0
+            
+            # Actualizar vencimiento y filas
+            # ... (Lógica de fechas simplificada para evitar complejidad aquí)
+            tipo = str(candidato.get("Tipo", "")).lower()
+            nuevo_venc = prox_venc_actual
+            
+            # Solo actualizar fecha si no es importado
+            if "importado" not in tipo and nuevo_estado == "Pendiente" and prox_venc_actual:
+                 try:
+                     f_venc = datetime.strptime(prox_venc_actual, "%Y-%m-%d")
+                     nuevo_venc = (f_venc + timedelta(days=14)).strftime("%Y-%m-%d")
+                 except: pass
+
+            fila = candidato_idx + 2
+            
+            self.worksheet.update(values=[[nuevo_pagado, nuevo_restante, nuevo_estado]], range_name=f"E{fila}:G{fila}")
+            self.worksheet.update(values=[[nuevo_venc]], range_name=f"I{fila}")
+            
+            return True, f"✅ Abonado ${monto_pago} a '{candidato['Descripción']}'. Resta: ${nuevo_restante:.2f}"
+
+        except Exception as e:
+            logger.error(f"Error registrando pago: {e}")
+            return False, f"Error: {str(e)}"
+
     def _parse_float(self, val):
         """Parsea valores numéricos manejando puntos y comas"""
         try:
@@ -210,7 +269,7 @@ class GestorDeudas:
         try:
             self.worksheet = self.spreadsheet.worksheet(self.NOMBRE_HOJA)
             creditos = self.obtener_credito_disponible()
-            todas = self.worksheet.get_all_records()
+            todas = self.worksheet.get_all_records(numericise_ignore=['all'])
             pendientes = [d for d in todas if str(d.get("Estado")).lower() != "pagado"]
             
             msg = "💳 **ESTADO DE CRÉDITO**\n"
