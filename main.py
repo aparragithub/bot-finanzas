@@ -711,10 +711,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             gestor_saldos.sheet = get_or_create_spreadsheet().sheet1
             
             saldos_dict = gestor_saldos.obtener_saldo_por_ubicacion()
-            saldo_sistema = saldos_dict.get(ubicacion, {}).get(moneda, 0.0)
             
-            # Normalizar saldo sistema si viene con comas en el futuro (aunque gestor devuelve float)
-            saldo_sistema = float(saldo_sistema)
+            # Búsqueda Case-Insensitive
+            saldo_sistema = 0.0
+            
+            # 1. Buscar ubicación (Ej: "Venezuela" vs "venezuela")
+            ubic_key = next((k for k in saldos_dict.keys() if k.lower() == ubicacion.lower()), None)
+            
+            if ubic_key:
+                monedas_dict = saldos_dict[ubic_key]
+                # 2. Buscar moneda (Ej: "Bs" vs "BS")
+                mon_key = next((k for k in monedas_dict.keys() if k.lower() == moneda.lower()), None)
+                if mon_key:
+                    saldo_sistema = float(monedas_dict[mon_key])
             
             diferencia = saldo_sistema - saldo_real
             
