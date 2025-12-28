@@ -698,18 +698,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text: return
     text = update.message.text
     
-    # � AJUSTAR SALDO (Comisiones Bancarias)
-    # Formato: "ajustar saldo venezuela bs 7746.89"
+    # 💰 AJUSTAR SALDO (Comisiones Bancarias)
+    # Formato: "ajustar saldo bs 7746.89" (auto-detecta ubicación por moneda)
     match_ajuste = re.search(
-        r'ajustar\s+saldo\s+(venezuela|ecuador|binance)\s+(bs|usd|usdt)\s+([\d,.]+)',
+        r'ajustar\s+saldo\s+(?:(venezuela|ecuador|binance)\s+)?(bs|usd|usdt|btc|eth|bnb)\s+([\d,.]+)',
         text,
         re.IGNORECASE
     )
     if match_ajuste:
         try:
-            ubicacion = match_ajuste.group(1).capitalize()
+            ubicacion_input = match_ajuste.group(1)
             moneda = match_ajuste.group(2).upper()
             saldo_real = float(match_ajuste.group(3).replace(',', ''))
+            
+            # Auto-detectar ubicación si no se especificó
+            if ubicacion_input:
+                ubicacion = ubicacion_input.capitalize()
+            else:
+                if moneda in ['BS', 'VES']:
+                    ubicacion = 'Venezuela'
+                elif moneda == 'USD':
+                    ubicacion = 'Ecuador'
+                elif moneda in ['USDT', 'BTC', 'ETH', 'BNB']:
+                    ubicacion = 'Binance'
+                else:
+                    ubicacion = 'Venezuela'  # Default
             
             # Calcular saldo actual del sistema
             saldo_sistema = calcular_saldo(ubicacion, moneda)
