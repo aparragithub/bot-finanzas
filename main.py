@@ -610,8 +610,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔄 Procesando...")
     try:
         t_data = classify_transaction(text)
-        success, msg = save_to_sheets(t_data)
-        await update.message.reply_text("✅ Listo!" + msg if success else "❌ Error: " + str(msg))
+        
+        # 🔄 LÓGICA DE CONVERSIÓN (Forex)
+        if t_data.get('tipo', '').lower() == 'conversión' or t_data.get('moneda_destino'):
+            # Transacción 1: Salida (Egreso)
+            t_salida = t_data.copy()
+            t_salida['tipo'] = 'Egreso'
+            t_salida['categoria'] = 'Conversión'
+            t_salida['descripcion'] = f"Conversión a {t_data.get('moneda_destino')}"
+            
+            # Transacción 2: Entrada (Ingreso)
+            t_entrada = t_data.copy()
+            t_entrada['tipo'] = 'Ingreso'
+            t_entrada['categoria'] = 'Conversión'
+            t_entrada['monto'] = t_data.get('monto_destino')
+            t_entrada['moneda'] = t_data.get('moneda_destino')
+            t_entrada['descripcion'] = f"Conversión desde {t_data.get('moneda')}"
+            # Ajustar ubicación de entrada si es crypto
+            if t_entrada['moneda'] in ['USDT', 'BTC', 'ETH']:
+                t_entrada['ubicacion'] = 'Binance'
+            elif t_entrada['moneda'] == 'Bs':
+                t_entrada['ubicacion'] = 'Venezuela'
+                
+            # Guardar ambas
+            s1, m1 = save_to_sheets(t_salida)
+            s2, m2 = save_to_sheets(t_entrada)
+            
+            if s1 and s2:
+                await update.message.reply_text(f"✅ **Conversión Exitosa**\n📤 Salió: {t_salida['monto']} {t_salida['moneda']}\n📥 Entró: {t_entrada['monto']} {t_entrada['moneda']}")
+            else:
+                await update.message.reply_text(f"⚠️ **Conversión Parcial**\nSalida: {m1}\nEntrada: {m2}")
+                
+        else:
+            # Flujo Normal
+            success, msg = save_to_sheets(t_data)
+            await update.message.reply_text("✅ Listo!" + msg if success else "❌ Error: " + str(msg))
+
     except Exception as e:
         logger.error(f"Error: {e}")
         await update.message.reply_text("❌ No entendí.")
