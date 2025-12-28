@@ -52,7 +52,7 @@ class GestorDeudas:
             
             for d in pendientes:
                 tipo = str(d.get("Tipo", "Normal")).lower()
-                restante = float(d.get("Restante", 0))
+                restante = self._parse_float(d.get("Restante", 0))
                 
                 if "cotidiana" in tipo:
                     uso_cotidiana += restante
