@@ -327,6 +327,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         transaction = json.loads(result_text)
         
+        # Mapear 'total' a 'monto' si es necesario
+        if 'total' in transaction and 'monto' not in transaction:
+            transaction['monto'] = transaction['total']
+        
         if transaction.get('fecha') and '2023' in transaction.get('fecha'):
              transaction['fecha'] = transaction['fecha'].replace('2023', '2025')
              
