@@ -688,8 +688,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if match_ajuste:
         try:
             ubicacion_input = match_ajuste.group(1)
-            moneda = match_ajuste.group(2).upper()
+            moneda_input = match_ajuste.group(2).upper()
             saldo_real = float(match_ajuste.group(3).replace(',', ''))
+            
+            # Normalizar Moneda
+            moneda = "Bs" if moneda_input in ["BS", "VES"] else moneda_input
             
             # Auto-detectar ubicación si no se especificó
             if ubicacion_input:
