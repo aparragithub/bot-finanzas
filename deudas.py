@@ -14,8 +14,8 @@ class GestorDeudas:
     ENCABEZADOS = ["ID", "Fecha", "Descripción", "Monto Total", "Pagado", "Restante", "Estado", "Tipo", "Próximo Vencimiento", "Fuente"]
 
     # Límites de Crédito (Configurables)
-    LIMITE_COTIDIANA = 150.0  # 1 Cuota
-    LIMITE_PRINCIPAL = 400.0  # 3+ Cuotas
+    LIMITE_COTIDIANA = 146.0  # 1 Cuota
+    LIMITE_PRINCIPAL = 391.0  # 3+ Cuotas
 
     def __init__(self, spreadsheet):
         self.spreadsheet = spreadsheet
