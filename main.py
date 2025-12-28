@@ -484,15 +484,20 @@ async def comando_importardeuda(update: Update, context: ContextTypes.DEFAULT_TY
             msg = f"✅ **Plan Registrado ({fuente_detectada})**\n{msg_plan}\n📅 Inicio: {prox_venc}"
         else:
             # Una sola cuota
+            if fuente_detectada.lower() == "cashea":
+                tipo_deuda = "Cashea (Cotidiana) - Importado"
+            else:
+                tipo_deuda = f"Deuda ({fuente_detectada})"
+                
             gestor_deudas.crear_deuda(
                 descripcion=f"Imp: {descripcion}",
                 monto_total=monto_cuota,
                 monto_inicial=0,
-                tipo=f"Deuda ({fuente_detectada})",
+                tipo=tipo_deuda,
                 proximo_vencimiento=prox_venc,
                 fuente=fuente_detectada
             )
-            msg = f"✅ **Deuda Registrada ({fuente_detectada})**\n📦 {descripcion}\n� ${monto_cuota} (1 cuota)\n📅 Vence: {prox_venc}"
+            msg = f"✅ **Deuda Registrada ({fuente_detectada})**\n📦 {descripcion}\n💰 ${monto_cuota} (1 cuota)\n📅 Vence: {prox_venc}\n🏷️ Tipo: {tipo_deuda}"
         
         await update.message.reply_text(msg, parse_mode="Markdown")
 
