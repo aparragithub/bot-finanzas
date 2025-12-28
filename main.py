@@ -668,10 +668,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text: return
     text = update.message.text
     
-    # �️ DETECTAR CASHEA MANUAL
-    # Formato: "cashea inicial 11798.80 financiado 77.79 Supermercado Rio 28/12/2025"
+    # 🛍️ DETECTAR CASHEA MANUAL
+    # Formato: "cashea inicial 11798.80 bs financiado 77.79 usd Supermercado 28/12/2025 3 cuotas"
     match_cashea = re.search(
-        r'cashea\s+inicial\s+([\d,.]+)\s+financiado\s+([\d,.]+)\s+(.+?)(?:\s+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}))?$',
+        r'cashea\s+inicial\s+([\d,.]+)(?:\s*(?:bs|bolivares))?\s+financiado\s+([\d,.]+)(?:\s*(?:usd|d[oó]lares?))?\s+(.+?)(?:\s+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}))?(?:\s+(\d+)\s*cuotas?)?',
         text,
         re.IGNORECASE
     )
@@ -681,6 +681,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             financiado_usd = float(match_cashea.group(2).replace(',', ''))
             descripcion = match_cashea.group(3).strip()
             fecha_raw = match_cashea.group(4)
+            num_cuotas_raw = match_cashea.group(5)
+            
+            # Número de cuotas (default 3 para Cashea estándar)
+            num_cuotas = int(num_cuotas_raw) if num_cuotas_raw else 1
             
             # Fecha
             if fecha_raw:
@@ -709,11 +713,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # 2. Registrar Deuda
             if not gestor_deudas: get_or_create_spreadsheet()
-            monto_cuota = financiado_usd / 3
+            monto_cuota = financiado_usd / num_cuotas
             ok, msg_deuda = gestor_deudas.crear_plan_cuotas(
                 descripcion=f"Cashea {descripcion}",
                 monto_cuota=monto_cuota,
-                num_cuotas=3,
+                num_cuotas=num_cuotas,
                 fecha_inicio=fecha,
                 linea="Principal",
                 fuente="Cashea"
