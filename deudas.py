@@ -123,7 +123,8 @@ class GestorDeudas:
             if not fecha_compra:
                 fecha_compra = datetime.now().strftime("%Y-%m-%d")
                 
-            deuda_id = f"DEUDA-{int(datetime.now().timestamp() * 1000)}" # ID único ms
+            # Lógica de ID Secuencial
+            deuda_id = self._generar_proximo_id()
             restante = monto_total - monto_inicial
             estado = "Pendiente" if restante > 0.01 else "Pagado"
 
@@ -251,6 +252,70 @@ class GestorDeudas:
             logger.error(f"Error registrando pago: {e}")
             return False, f"Error: {str(e)}"
 
+    def pagar_deuda_completa(self, deuda_id: str, fecha_pago: str, tasa_cambio: float):
+        """
+        Paga la totalidad restante de una deuda.
+        Retorna (exito, mensaje, dict_transaccion_bs)
+        """
+        try:
+            # Refresh data
+            todas = self.worksheet.get_all_records(numericise_ignore=['all'])
+            candidato = None
+            candidato_idx = -1
+            
+            # Buscar por ID Exacto (Case insensitive)
+            for i, deuda in enumerate(todas):
+                if str(deuda.get("ID", "")).upper() == deuda_id.upper():
+                    candidato = deuda
+                    candidato_idx = i
+                    break
+            
+            if not candidato:
+                return False, f"No existe deuda con ID {deuda_id}", None
+
+            try:
+                restante = self._parse_float(candidato.get("Restante", 0))
+                descripcion = candidato.get("Descripción", "Deuda")
+                estado = candidato.get("Estado", "")
+            except:
+                return False, "Error leyendo datos de la deuda", None
+
+            if estado.lower() == "pagado" or restante <= 0.01:
+                return False, f"La deuda {deuda_id} ya está pagada.", None
+
+            # Calcular monto en Bs
+            monto_bs = restante * tasa_cambio
+
+            # -- Actualizar Hoja Deudas --
+            # Pagado += Restante
+            # Restante = 0
+            # Estado = Pagado
+            pagado_ant = self._parse_float(candidato.get("Pagado", 0))
+            nuevo_pagado = pagado_ant + restante
+            
+            fila = candidato_idx + 2
+            # Actualizar E, F, G (Pagado, Restante, Estado) -> Cols 5, 6, 7
+            self.worksheet.update(values=[[nuevo_pagado, 0, "Pagado"]], range_name=f"E{fila}:G{fila}")
+            
+            # -- Preparar Transaccion de Egreso (Bs) --
+            transaccion = {
+                "fecha": fecha_pago,
+                "tipo": "Egreso",
+                "categoria": "Pago de Deuda",
+                "ubicacion": "Venezuela",
+                "moneda": "Bs",
+                "monto": monto_bs,
+                "tasa_usada": tasa_cambio,
+                "usd_equivalente": restante,
+                "descripcion": f"Pago {deuda_id}: {descripcion}"
+            }
+            
+            return True, f"✅ Deuda {deuda_id} pagada.\n💵 Monto: {monto_bs:,.2f} Bs (Tasa: {tasa_cambio})", transaccion
+
+        except Exception as e:
+            logger.error(f"Error pagar completa: {e}")
+            return False, f"Error: {e}", None
+
     def _parse_float(self, val):
         """Parsea valores numéricos manejando puntos y comas"""
         try:
@@ -310,3 +375,42 @@ class GestorDeudas:
         except Exception as e:
             logger.error(f"Error resumen: {e}")
             return f"Error: {e}"
+
+    def _generar_proximo_id(self):
+        """Genera DEUDA-N+1 basado en los existentes"""
+        try:
+            ids = self.worksheet.col_values(1) # Columna ID
+            max_id = 0
+            for i in ids:
+                if i.startswith("DEUDA-"):
+                    try:
+                        num = int(i.split("-")[1])
+                        if num > max_id: max_id = num
+                    except: pass
+            return f"DEUDA-{max_id + 1}"
+        except:
+            return "DEUDA-1"
+
+    def migrar_ids_legacy(self):
+        """Migra IDs antiguos (timestamp) a secuenciales (DEUDA-1...)"""
+        try:
+            filas = self.worksheet.get_all_values()
+            if not filas or len(filas) < 2: return "Sin datos"
+            
+            headers = filas[0]
+            data = filas[1:]
+            
+            # Ordenar por fecha (más viejo primero para ser DEUDA-1)
+            try:
+                data.sort(key=lambda x: datetime.strptime(x[1], "%Y-%m-%d"))
+            except: pass 
+            
+            updates = []
+            for idx, row in enumerate(data):
+                nuevo_id = f"DEUDA-{idx + 1}"
+                self.worksheet.update_cell(idx + 2, 1, nuevo_id)
+                updates.append(nuevo_id)
+                
+            return f"Migrados {len(updates)} IDs."
+        except Exception as e:
+            return f"Error migrando: {e}"

@@ -605,6 +605,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text: return
     text = update.message.text
     
+    # 💸 DETECTAR PAGO DE DEUDA ESPECÍFICA (ID)
+    # Formato: "pagué deuda-5 [25/12/2025]"
+    match_pago = re.search(r'pagu[ée]\s+(deuda-\d+)(?:\s+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}))?', text, re.IGNORECASE)
+    if match_pago:
+        deuda_id = match_pago.group(1)
+        fecha_pago_raw = match_pago.group(2)
+        
+        # Determinar Fecha y Tasa
+        if fecha_pago_raw:
+             # Normalizar fecha
+             try:
+                 parts = re.split(r'[-/]', fecha_pago_raw)
+                 # Asumir DD/MM/YYYY
+                 fecha_pago = f"{parts[2]}-{parts[1]}-{parts[0]}" if len(parts[2])==4 else f"20{parts[2]}-{parts[1]}-{parts[0]}"
+             except:
+                 fecha_pago = datetime.now().strftime("%Y-%m-%d")
+                 
+             # Tasa Histórica
+             tasa = gestor_tasas.obtener_tasa_historica(fecha_pago)
+             if not tasa: tasa = gestor_tasas.obtener_tasa()
+        else:
+             fecha_pago = datetime.now().strftime("%Y-%m-%d")
+             tasa = gestor_tasas.obtener_tasa()
+        
+        # Procesar Pago
+        exito, msg, transaccion = gestor_deudas.pagar_deuda_completa(deuda_id, fecha_pago, tasa)
+        
+        if exito and transaccion:
+            s, m = save_to_sheets(transaccion)
+            await update.message.reply_text(f"{msg}\n✅ Egreso registrado: {m}")
+        else:
+            await update.message.reply_text(f"❌ {msg}")
+        return
+    
     if "cashea" in text.lower() and "gasto" in text.lower():
         t_data = classify_transaction(text)
         success, msg = save_to_sheets(t_data)
