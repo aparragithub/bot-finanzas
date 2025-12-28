@@ -333,19 +333,22 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         img_buffer = BytesIO()
         await photo_file.download_to_memory(out=img_buffer)
         
-        prompt_vision = """Analiza esta imagen. Responde SOLO JSON:
+        prompt_vision = """Analiza esta imagen (Factura o App de Transporte). Responde SOLO JSON:
         {
             "tipo": "Egreso",
-            "categoria": "Alimentación, Transporte, Salud, Servicios, Compras, Limpieza u Otro",
-            "ubicacion": "Ecuador" o "Venezuela" (inferir por moneda: Bs=Venezuela, USD=Ecuador),
+            "categoria": "Transporte, Alimentación, Salud, Servicios, Compras u Otro",
+            "ubicacion": "Ecuador" o "Venezuela" (Bs=Venezuela),
             "moneda": "USD" o "Bs",
-            "subtotal": número o null,
-            "iva": número o null,
-            "total": número,
-            "descripcion": "nombre del local + items",
-            "fecha": "DD/MM/YYYY" o null (verifica año 2025),
-            "tasa_especifica": número o null (SOLO Tasa de Cambio BCV/Paralelo. NO confundir con 16% IVA o Alícuota),
-        }"""
+            "monto": número (TOTAL FINAL),
+            "descripcion": "nombre del servicio/local",
+            "fecha": "DD/MM/YYYY" o null,
+            "tasa_especifica": número o null (Tasa Cambio Implícita Bs/USD)
+        }
+        INSTRUCCIONES CLAVE:
+        1. Si es Yummy/Ridery y hay precios en $ y Bs (ej: "$4.38 / Bs 1291"), y el método es "Pago Móvil", USA Bs como moneda y 1291 como monto.
+        2. Si usas Bs, CALCULA la tasa_especifica = MontoBs / MontoS. (Ej: 1291/4.38 = 294.97).
+        3. Ignora 16% IVA para la tasa. Solo tasa de cambio.
+        """
         
         # Lógica simplificada Gemini
         img_buffer.seek(0)
