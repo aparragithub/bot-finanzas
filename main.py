@@ -489,7 +489,7 @@ Aquí tienes tu "Chuleta" de comandos rápidos:
 ¡Solo envíame una foto! Yo leo los montos y la fecha.
 
 💡 **COMANDOS ÚTILES**
-/balance - Resumen total de tu dinero
+/saldo - Resumen total de tu dinero
 /deudas - Ver tus créditos pendientes
 /tasa - Ver precio del dólar BCV
 """
