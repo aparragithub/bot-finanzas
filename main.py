@@ -432,7 +432,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         logger.error(f"Error Vision: {e}")
-        await update.message.reply_text("❌ Error analizando imagen.")
+        await update.message.reply_text(
+            "❌ Error procesando imagen.\n\n"
+            "💡 **Para Cashea**, envíame este formato:\n"
+            "`cashea inicial [monto_bs] financiado [monto_usd] [local] [fecha]`\n\n"
+            "Ejemplo:\n"
+            "`cashea inicial 11798.80 financiado 77.79 Supermercado Rio 28/12/2025`"
+        )
 
 # --- COMANDOS ESTRUCTURALES ---
 
@@ -662,7 +668,69 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text: return
     text = update.message.text
     
-    # 💸 DETECTAR PAGO DE DEUDA ESPECÍFICA (ID)
+    # �️ DETECTAR CASHEA MANUAL
+    # Formato: "cashea inicial 11798.80 financiado 77.79 Supermercado Rio 28/12/2025"
+    match_cashea = re.search(
+        r'cashea\s+inicial\s+([\d,.]+)\s+financiado\s+([\d,.]+)\s+(.+?)(?:\s+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}))?$',
+        text,
+        re.IGNORECASE
+    )
+    if match_cashea:
+        try:
+            inicial_bs = float(match_cashea.group(1).replace(',', ''))
+            financiado_usd = float(match_cashea.group(2).replace(',', ''))
+            descripcion = match_cashea.group(3).strip()
+            fecha_raw = match_cashea.group(4)
+            
+            # Fecha
+            if fecha_raw:
+                try:
+                    parts = re.split(r'[-/]', fecha_raw)
+                    fecha = f"{parts[2]}-{parts[1]}-{parts[0]}" if len(parts[2])==4 else f"20{parts[2]}-{parts[1]}-{parts[0]}"
+                except:
+                    fecha = datetime.now().strftime("%Y-%m-%d")
+            else:
+                fecha = datetime.now().strftime("%Y-%m-%d")
+            
+            # Tasa (opcional, pero calculamos para completitud)
+            tasa = gestor_tasas.obtener_tasa()
+            
+            # 1. Registrar Gasto (Inicial)
+            t_inicial = {
+                'fecha': fecha,
+                'tipo': 'Egreso',
+                'categoria': 'Compras',
+                'ubicacion': 'Venezuela',
+                'moneda': 'Bs',
+                'monto': inicial_bs,
+                'descripcion': f'Inicial Cashea {descripcion}'
+            }
+            s1, m1 = save_to_sheets(t_inicial, tasa)
+            
+            # 2. Registrar Deuda
+            if not gestor_deudas: get_or_create_spreadsheet()
+            monto_cuota = financiado_usd / 3
+            ok, msg_deuda = gestor_deudas.crear_plan_cuotas(
+                descripcion=f"Cashea {descripcion}",
+                monto_cuota=monto_cuota,
+                num_cuotas=3,
+                fecha_inicio=fecha,
+                linea="Principal",
+                fuente="Cashea"
+            )
+            
+            await update.message.reply_text(
+                f"✅ **Cashea Registrado!**\n"
+                f"💵 Inicial: Bs {inicial_bs:,.2f}\n"
+                f"📉 Financiado: ${financiado_usd:.2f}\n"
+                f"{msg_deuda}"
+            )
+            return
+        except Exception as e:
+            await update.message.reply_text(f"❌ Error procesando Cashea manual: {e}")
+            return
+    
+    # �💸 DETECTAR PAGO DE DEUDA ESPECÍFICA (ID)
     # Formato: "pagué deuda-5 [25/12/2025]"
     match_pago = re.search(r'pagu[ée]\s+(deuda-\d+)(?:\s+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}))?', text, re.IGNORECASE)
     if match_pago:
