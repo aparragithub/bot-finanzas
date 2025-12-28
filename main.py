@@ -84,6 +84,36 @@ def normalize_input(text: str) -> str:
     
     return normalized
 
+def calcular_saldo(ubicacion: str, moneda: str) -> float:
+    """Calcula el saldo actual para una ubicación y moneda específica"""
+    try:
+        spreadsheet = get_or_create_spreadsheet()
+        worksheet = spreadsheet.sheet1
+        records = worksheet.get_all_records()
+        
+        saldo = 0.0
+        for r in records:
+            # Normalizar ubicación y moneda para comparar
+            r_ubic = str(r.get('Ubicación', '')).strip().lower()
+            r_mon = str(r.get('Moneda', '')).strip().upper()
+            r_tipo = str(r.get('Tipo', '')).strip().lower()
+            
+            if r_ubic == ubicacion.lower() and r_mon == moneda.upper():
+                try:
+                    monto = float(r.get('Monto', 0))
+                    if r_tipo == 'ingreso':
+                        saldo += monto
+                    elif r_tipo == 'egreso':
+                        saldo -= monto
+                except:
+                    pass
+        
+        return saldo
+    except Exception as e:
+        logger.error(f"Error calculando saldo: {e}")
+        return 0.0
+
+
 def get_google_sheets_client():
     """Obtiene el cliente de Google Sheets"""
     try:
@@ -668,7 +698,61 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text: return
     text = update.message.text
     
-    # 🛍️ DETECTAR CASHEA MANUAL
+    # � AJUSTAR SALDO (Comisiones Bancarias)
+    # Formato: "ajustar saldo venezuela bs 7746.89"
+    match_ajuste = re.search(
+        r'ajustar\s+saldo\s+(venezuela|ecuador|binance)\s+(bs|usd|usdt)\s+([\d,.]+)',
+        text,
+        re.IGNORECASE
+    )
+    if match_ajuste:
+        try:
+            ubicacion = match_ajuste.group(1).capitalize()
+            moneda = match_ajuste.group(2).upper()
+            saldo_real = float(match_ajuste.group(3).replace(',', ''))
+            
+            # Calcular saldo actual del sistema
+            saldo_sistema = calcular_saldo(ubicacion, moneda)
+            diferencia = saldo_sistema - saldo_real
+            
+            if abs(diferencia) < 0.01:
+                await update.message.reply_text(
+                    f"✅ El saldo ya está correcto.\n"
+                    f"📊 {ubicacion} - {moneda}: {saldo_sistema:,.2f}"
+                )
+                return
+            
+            # Registrar ajuste como Egreso por comisión (o Ingreso si es negativo)
+            tipo_ajuste = "Egreso" if diferencia > 0 else "Ingreso"
+            monto_ajuste = abs(diferencia)
+            
+            t_ajuste = {
+                'fecha': datetime.now().strftime("%Y-%m-%d"),
+                'tipo': tipo_ajuste,
+                'categoria': 'Comisión Bancaria',
+                'ubicacion': ubicacion,
+                'moneda': moneda,
+                'monto': monto_ajuste,
+                'descripcion': f'Ajuste de saldo (Real: {saldo_real:,.2f})'
+            }
+            
+            tasa = gestor_tasas.obtener_tasa() if moneda == 'Bs' else None
+            s, m = save_to_sheets(t_ajuste, tasa)
+            
+            await update.message.reply_text(
+                f"✅ **Saldo Ajustado**\n"
+                f"📍 {ubicacion} - {moneda}\n"
+                f"💼 Sistema: {saldo_sistema:,.2f}\n"
+                f"🏦 Real: {saldo_real:,.2f}\n"
+                f"{'📉' if diferencia > 0 else '📈'} Diferencia: {monto_ajuste:,.2f} ({tipo_ajuste})\n\n"
+                f"Registrado como: **{t_ajuste['categoria']}**"
+            )
+            return
+        except Exception as e:
+            await update.message.reply_text(f"❌ Error ajustando saldo: {e}")
+            return
+    
+    # �🛍️ DETECTAR CASHEA MANUAL
     # Formato: "cashea inicial 11798.80 bs financiado 77.79 usd Supermercado 28/12/2025 3 cuotas"
     match_cashea = re.search(
         r'cashea\s+inicial\s+([\d,.]+)(?:\s*(?:bs|bolivares))?\s+financiado\s+([\d,.]+)(?:\s*(?:usd|d[oó]lares?))?\s+(.+?)(?:\s+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}))?(?:\s+(\d+)\s*cuotas?)?',
@@ -683,7 +767,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             fecha_raw = match_cashea.group(4)
             num_cuotas_raw = match_cashea.group(5)
             
-            # Número de cuotas (default 3 para Cashea estándar)
+            # Número de cuotas (default 1 para Cashea estándar)
             num_cuotas = int(num_cuotas_raw) if num_cuotas_raw else 1
             
             # Fecha
