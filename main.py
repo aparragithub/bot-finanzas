@@ -612,13 +612,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         t_data = classify_transaction(text)
         
         # 🔄 LÓGICA DE CONVERSIÓN (Forex)
+        # 🔄 LÓGICA DE CONVERSIÓN (Forex)
         if t_data.get('tipo', '').lower() == 'conversión' or t_data.get('moneda_destino'):
+            
+            def obtener_ubicacion_por_moneda(moneda):
+                moneda = moneda.upper()
+                if moneda in ['USDT', 'BTC', 'ETH', 'BNB']: return 'Binance'
+                if moneda in ['BS', 'VES']: return 'Venezuela'
+                if moneda == 'USD': return 'Ecuador'
+                return 'Venezuela' # Default safe
+
             # Transacción 1: Salida (Egreso)
             t_salida = t_data.copy()
             t_salida['tipo'] = 'Egreso'
             t_salida['categoria'] = 'Conversión'
             t_salida['descripcion'] = f"Conversión a {t_data.get('moneda_destino')}"
-            
+            # Forzar ubicación de salida basada en su moneda
+            t_salida['ubicacion'] = obtener_ubicacion_por_moneda(t_salida.get('moneda', ''))
+
             # Transacción 2: Entrada (Ingreso)
             t_entrada = t_data.copy()
             t_entrada['tipo'] = 'Ingreso'
@@ -626,11 +637,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             t_entrada['monto'] = t_data.get('monto_destino')
             t_entrada['moneda'] = t_data.get('moneda_destino')
             t_entrada['descripcion'] = f"Conversión desde {t_data.get('moneda')}"
-            # Ajustar ubicación de entrada si es crypto
-            if t_entrada['moneda'] in ['USDT', 'BTC', 'ETH']:
-                t_entrada['ubicacion'] = 'Binance'
-            elif t_entrada['moneda'] == 'Bs':
-                t_entrada['ubicacion'] = 'Venezuela'
+            # Forzar ubicación de entrada basada en su moneda
+            t_entrada['ubicacion'] = obtener_ubicacion_por_moneda(t_entrada.get('moneda', ''))
                 
             # Guardar ambas
             s1, m1 = save_to_sheets(t_salida)
