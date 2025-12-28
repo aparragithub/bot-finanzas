@@ -148,7 +148,8 @@ class GestorDeudas:
                 fuente
             ]
             
-            self.worksheet.append_row(row, table_range="A1")
+            # Insertar al inicio (fila 2) para respetar el formato de Tabla en GSheets
+            self.worksheet.insert_row(row, index=2)
             logger.info(f"Deuda creada: {descripcion}")
             return deuda_id, restante
 
