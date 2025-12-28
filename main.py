@@ -84,12 +84,32 @@ def normalize_input(text: str) -> str:
     
     return normalized
 
+def parse_float(val):
+    """Parsea valores numéricos manejando puntos y comas"""
+    try:
+        if isinstance(val, (float, int)):
+            return float(val)
+        if isinstance(val, str):
+            # Limpiar caracteres no numéricos excepto , . -
+            val = re.sub(r'[^\d,.-]', '', val)
+            # Reemplazar coma por punto si es decimal (ej: 50,20 -> 50.20)
+            # Si hay punto y coma, asumir formato 1.000,00 -> 1000.00
+            if '.' in val and ',' in val:
+                val = val.replace('.', '').replace(',', '.')
+            elif ',' in val:
+                val = val.replace(',', '.')
+            return float(val)
+        return 0.0
+    except:
+        return 0.0
+
 def calcular_saldo(ubicacion: str, moneda: str) -> float:
     """Calcula el saldo actual para una ubicación y moneda específica"""
     try:
         spreadsheet = get_or_create_spreadsheet()
         worksheet = spreadsheet.sheet1
-        records = worksheet.get_all_records()
+        # Usar numericise_ignore=['all'] para leer string raw y parsear nosotros
+        records = worksheet.get_all_records(numericise_ignore=['all'])
         
         saldo = 0.0
         for r in records:
@@ -100,7 +120,7 @@ def calcular_saldo(ubicacion: str, moneda: str) -> float:
             
             if r_ubic == ubicacion.lower() and r_mon == moneda.upper():
                 try:
-                    monto = float(r.get('Monto', 0))
+                    monto = parse_float(r.get('Monto', 0))
                     if r_tipo == 'ingreso':
                         saldo += monto
                     elif r_tipo == 'egreso':
@@ -749,7 +769,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'descripcion': f'Ajuste de saldo (Real: {saldo_real:,.2f})'
             }
             
-            tasa = gestor_tasas.obtener_tasa() if moneda == 'Bs' else None
+            tasa = gestor_tasas.obtener_tasa() if moneda in ['BS', 'VES'] else None
             s, m = save_to_sheets(t_ajuste, tasa)
             
             await update.message.reply_text(
