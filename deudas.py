@@ -205,7 +205,7 @@ class GestorDeudas:
             return False, f"Error: {str(e)}"
 
     def obtener_resumen(self):
-        """Retorna resumen de deudas y líneas de crédito"""
+        """Retorna resumen de deudas, líneas de crédito y custodias"""
         try:
             creditos = self.obtener_credito_disponible()
             todas = self.worksheet.get_all_records()
@@ -219,15 +219,33 @@ class GestorDeudas:
                 msg += "✅ **No tienes deudas pendientes.**"
                 return msg
                 
-            msg += "📉 **DEUDAS ACTIVAS**\n"
-            total_deuda = 0
+            deudas_reales = []
+            custodias = []
+            
             for d in pendientes:
-                restante = float(d.get("Restante", 0))
-                total_deuda += restante
-                venc = d.get("Próximo Vencimiento", "N/A")
-                msg += f"• {d['Descripción']}: **${restante:.2f}** (Vence: {venc})\n"
-                
-            msg += f"\n💰 **Total a Pagar:** ${total_deuda:.2f}"
+                tipo = str(d.get("Tipo", "")).lower()
+                if "custodia" in tipo:
+                    custodias.append(d)
+                else:
+                    deudas_reales.append(d)
+
+            total_deuda = 0
+            if deudas_reales:
+                msg += "📉 **DEUDAS POR PAGAR**\n"
+                for d in deudas_reales:
+                    restante = float(d.get("Restante", 0))
+                    total_deuda += restante
+                    venc = d.get("Próximo Vencimiento", "N/A")
+                    msg += f"• {d['Descripción']}: **${restante:.2f}** (Vence: {venc})\n"
+                msg += f"💰 **Total Deuda:** ${total_deuda:.2f}\n"
+
+            if custodias:
+                total_custodia = sum(float(c.get("Restante", 0)) for c in custodias)
+                msg += "\n🔐 **FONDOS EN CUSTODIA (Terceros)**\n"
+                for c in custodias:
+                    msg += f"• {c['Descripción']}: ${float(c.get('Restante', 0)):.2f}\n"
+                msg += f"🏦 **Total Custodia:** ${total_custodia:.2f}\n"
+            
             return msg
             
         except Exception as e:

@@ -330,9 +330,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Mapear 'total' a 'monto' si es necesario
         if 'total' in transaction and 'monto' not in transaction:
             transaction['monto'] = transaction['total']
-        
-        if transaction.get('fecha') and '2023' in transaction.get('fecha'):
-             transaction['fecha'] = transaction['fecha'].replace('2023', '2025')
              
         tasa = transaction.get('tasa_especifica') if transaction['moneda'] == 'Bs' else None
         
@@ -449,6 +446,45 @@ async def comando_importardeuda(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         await update.message.reply_text(f"❌ Error interno: {e}")
 
+
+async def comando_custodia(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Registra fondos de terceros (Pasivo).
+    Uso: /custodia [monto] [descripcion]
+    Ej: /custodia 100 Ahorros Papa
+    """
+    try:
+        args = context.args
+        if not args or len(args) < 2:
+            await update.message.reply_text("❌ Uso: `/custodia [monto] [descripcion]`\nEj: `/custodia 100 Ahorro Papa`")
+            return
+            
+        monto = float(args[0])
+        descripcion = " ".join(args[1:])
+        
+        if not gestor_deudas: get_or_create_spreadsheet()
+        
+        # Crear Pasivo tipo 'Custodia'
+        gestor_deudas.crear_deuda(
+            descripcion=f"Custodia: {descripcion}",
+            monto_total=monto,
+            monto_inicial=0,
+            tipo="Custodia (Pasivo)",
+            proximo_vencimiento="N/A" # No vence, es indeterminado
+        )
+        
+        msg = f"🔐 **Fondo en Custodia Registrado**\n"
+        msg += f"📝 Concepto: {descripcion}\n"
+        msg += f"💰 Monto: ${monto}\n"
+        msg += "⚠️ Recuerda registrar el INGRESO real si el dinero entró a tus cuentas (ej: `ingreso 100 usd binance`)."
+        
+        await update.message.reply_text(msg, parse_mode="Markdown")
+
+    except ValueError:
+        await update.message.reply_text("❌ El monto debe ser numérico")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
 async def comando_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Ver saldo acumulado (suma de transacciones)"""
     try:
@@ -484,6 +520,8 @@ Aquí tienes tu "Chuleta" de comandos rápidos:
 🏦 **CONTROL DE SALDOS**
 • **Cargar Saldo Inicial:** `ingreso 500 bs banesco saldo inicial`
 • **Ver mis Cuentas:** `/saldo`
+• **Dinero de Terceros (Papá):** `/custodia 100 Ahorros Papa`
+  *(Registra que 100 de tu saldo son prestados/custodia)*
 
 💱 **CONVERSIONES (Binance)**
 • `cambié 100 usd a 98 usdt`
@@ -536,6 +574,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("cashea", comando_cashea))
     app.add_handler(CommandHandler("importardeuda", comando_importardeuda))
+    app.add_handler(CommandHandler("custodia", comando_custodia))
     app.add_handler(CommandHandler("saldo", comando_saldo))
     app.add_handler(CommandHandler("tasa", comando_simple_tasa))
     app.add_handler(CommandHandler("deudas", comando_simple_deudas))
