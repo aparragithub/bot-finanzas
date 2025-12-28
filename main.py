@@ -73,10 +73,15 @@ def normalize_input(text: str) -> str:
         'gaste ': 'gasté ', 'gaste,': 'gasté,', 'gaste.': 'gasté.',
         'cobre ': 'cobré ', 'cobre,': 'cobré,', 'cobre.': 'cobré.',
         'compre ': 'compré ', 'compre,': 'compré,', 'compre.': 'compré.',
-        'pague ': 'pagué ', 'pague,': 'pagué,', 'pague.': 'pagué.',
+        'pague ': 'pagué ', 'pague,': 'pague.',
+        'ves ': 'bs ', 'ves,': 'bs,', 'ves.': 'bs.', # Normalizar VES
     }
     for key, value in replacements.items():
         normalized = normalized.replace(key, value)
+    
+    # Asegurar mapeo global de ves a bs incluso sin espacios
+    normalized = normalized.replace(' ves ', ' bs ')
+    
     return normalized
 
 def get_google_sheets_client():
@@ -339,7 +344,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "total": número,
             "descripcion": "nombre del local + items",
             "fecha": "DD/MM/YYYY" o null (verifica año 2025),
-            "tasa_especifica": número o null
+            "tasa_especifica": número o null (SOLO Tasa de Cambio BCV/Paralelo. NO confundir con 16% IVA o Alícuota),
         }"""
         
         # Lógica simplificada Gemini
@@ -639,6 +644,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             t_entrada['descripcion'] = f"Conversión desde {t_data.get('moneda')}"
             # Forzar ubicación de entrada basada en su moneda
             t_entrada['ubicacion'] = obtener_ubicacion_por_moneda(t_entrada.get('moneda', ''))
+            
+            # 💱 Calcular Tasa Implícita para Conversiones
+            try:
+                m_sale = float(t_salida.get('monto', 0))
+                m_entra = float(t_entrada.get('monto', 0))
+                mon_sale = t_salida.get('moneda', '').upper()
+                mon_entra = t_entrada.get('moneda', '').upper()
+                
+                # Caso: Venta de USD/USDT a Bs (Entrada en Bs)
+                if mon_entra in ['BS', 'VES'] and mon_sale in ['USD', 'USDT'] and m_sale > 0:
+                    tasa_calc = m_entra / m_sale
+                    t_entrada['tasa_especifica'] = tasa_calc
+                
+                # Caso: Compra de USD/USDT con Bs (Salida en Bs)
+                elif mon_sale in ['BS', 'VES'] and mon_entra in ['USD', 'USDT'] and m_entra > 0:
+                    tasa_calc = m_sale / m_entra
+                    t_salida['tasa_especifica'] = tasa_calc
+            except: pass
                 
             # Guardar ambas
             s1, m1 = save_to_sheets(t_salida)
