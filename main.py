@@ -348,12 +348,26 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         INSTRUCCIONES CLAVE:
         1. Si es Yummy/Ridery (Precios $/Bs) y "Pago Móvil": Moneda=Bs, Monto=Bs, Tasa = Bs/$.
-        2. Si es CASHEA:
-           - BUSCA "MONTO BS" o "PAGO CUOTA INICIAL". Ese es el `monto` (Gasto). Moneda="Bs".
-           - `cashea_financiado_usd`: Busca "MONTO FINANCIADO USD" (ej: 77.79).
-           - `tasa_especifica`: Calcula Monto Bs / Monto USD (si aparecen ambos en la inicial).
-           - `descripcion`: "Inicial Cashea [Local]".
-           - `es_cashea`: true.
+        2. Si es CASHEA (texto "PAGO CUOTA INICIAL CASHEA"):
+           - Encuentra la línea exacta "MONTO BS :11.798,80" -> monto = 11798.80
+           - Moneda = "Bs"
+           - Encuentra la línea exacta "MONTO FINANCIADO USD: 77.79" -> cashea_financiado_usd = 77.79
+           - Si hay "MONTO USD: 40,00", úsalo para calcular tasa: tasa_especifica = 11798.80 / 40.00
+           - descripcion = "Inicial Cashea SUPERMERCADO RIO"
+           - es_cashea = true
+           EJEMPLO JSON CASHEA:
+           {
+             "tipo": "Egreso",
+             "categoria": "Compras",
+             "ubicacion": "Venezuela",
+             "moneda": "Bs",
+             "monto": 11798.80,
+             "descripcion": "Inicial Cashea SUPERMERCADO RIO",
+             "fecha": "28/12/2025",
+             "tasa_especifica": 294.97,
+             "es_cashea": true,
+             "cashea_financiado_usd": 77.79
+           }
         3. Ignora IVA (16%) para la tasa.
         """
         
