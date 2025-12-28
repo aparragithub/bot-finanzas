@@ -655,7 +655,11 @@ async def comando_simple_tasa(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text(f"Tasa: {gestor_tasas.obtener_tasa()}")
 
 async def comando_simple_deudas(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(gestor_deudas.obtener_resumen())
+    try:
+        tasa = gestor_tasas.obtener_tasa()
+    except:
+        tasa = 0
+    await update.message.reply_text(gestor_deudas.obtener_resumen(tasa_local=tasa))
 
 def main():
     if not TELEGRAM_TOKEN: return

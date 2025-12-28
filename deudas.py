@@ -192,68 +192,21 @@ class GestorDeudas:
         except Exception as e:
             return False, f"Error creando plan: {e}"
 
-    def registrar_pago_cuota(self, referencia: str, monto_pago: float):
-        """Abonar a una deuda existente"""
+    def _parse_float(self, val):
+        """Parsea valores numéricos manejando puntos y comas"""
         try:
-            todas = self.worksheet.get_all_records()
-            candidato = None
-            candidato_idx = -1
-            
-            referencia = referencia.lower()
-            
-            for i, deuda in enumerate(todas):
-                desc = str(deuda.get("Descripción", "")).lower()
-                estado = str(deuda.get("Estado", "")).lower()
-                if estado != "pagado" and referencia in desc:
-                    candidato = deuda
-                    candidato_idx = i
-                    break
-            
-            if not candidato:
-                return False, f"No encontré deuda pendiente con '{referencia}'"
+            if isinstance(val, (float, int)):
+                return float(val)
+            # Reemplazar coma por punto y limpiar
+            clean_val = str(val).replace(',', '.').strip()
+            # Remover caracteres no numéricos excepto punto (ej: $)
+            clean_val = "".join(c for c in clean_val if c.isdigit() or c == '.')
+            return float(clean_val)
+        except:
+            return 0.0
 
-            try:
-                pagado_anterior = float(candidato.get("Pagado", 0))
-                total = float(candidato.get("Monto Total", 0))
-                prox_venc_actual = candidato.get("Próximo Vencimiento", "")
-            except:
-                return False, "Error leyendo datos numéricos"
-
-            nuevo_pagado = pagado_anterior + monto_pago
-            nuevo_restante = total - nuevo_pagado
-            
-            nuevo_estado = "Pagado" if nuevo_restante <= 0.01 else "Pendiente"
-            if nuevo_restante < 0: nuevo_restante = 0
-            
-            # Actualizar vencimiento si es Cashea y sigue pendiente (Solo si no es importada fija)
-            nuevo_venc = prox_venc_actual
-            # En V3, si son cuotas separadas, NO avanzamos la fecha automáticamente
-            # Porque cada cuota es una row distinta.
-            # Solo avanzamos fecha si es una deuda "agrupada".
-            tipo = str(candidato.get("Tipo", "")).lower()
-            if "importado" not in tipo and nuevo_estado == "Pendiente" and prox_venc_actual:
-                 # Sumar 14 días al vencimiento actual (Legacy logic para deudas agrupadas)
-                 try:
-                     f_venc = datetime.strptime(prox_venc_actual, "%Y-%m-%d")
-                     nuevo_venc = (f_venc + timedelta(days=14)).strftime("%Y-%m-%d")
-                 except: pass
-
-            # Fila en hoja (1-based + header)
-            fila = candidato_idx + 2
-            
-            # Actualizar E(Pagado), F(Restante), G(Estado), I(Prox Venc)
-            # A=1, B=2, C=3, D=4, E=5, F=6, G=7, H=8, I=9
-            self.worksheet.update(values=[[nuevo_pagado, nuevo_restante, nuevo_estado]], range_name=f"E{fila}:G{fila}")
-            self.worksheet.update(values=[[nuevo_venc]], range_name=f"I{fila}")
-            
-            return True, f"✅ Abonado ${monto_pago} a '{candidato['Descripción']}'. Resta: ${nuevo_restante:.2f}"
-
-        except Exception as e:
-            logger.error(f"Error registrando pago: {e}")
-            return False, f"Error: {str(e)}"
-
-    def obtener_resumen(self):
-        """Retorna resumen visual"""
+    def obtener_resumen(self, tasa_local: float = None):
+        """Retorna resumen visual, opcionalmente con contravalor en Bs"""
         try:
             self.worksheet = self.spreadsheet.worksheet(self.NOMBRE_HOJA)
             creditos = self.obtener_credito_disponible()
@@ -274,19 +227,27 @@ class GestorDeudas:
                 msg += "📉 **POR PAGAR**\n"
                 total = 0
                 for d in deudas:
-                    restante = float(d.get("Restante", 0))
+                    val_str = d.get("Restante", 0)
+                    restante = self._parse_float(val_str)
                     total += restante
                     venc = d.get("Próximo Vencimiento", "N/A")
                     fuente = d.get("Fuente", "")
                     fuente_str = f" ({fuente})" if fuente else ""
                     msg += f"• {d['Descripción']}{fuente_str}: **${restante:.2f}** ({venc})\n"
-                msg += f"💰 Total: ${total:.2f}\n"
+                
+                msg += f"💰 **Total USD:** ${total:.2f}\n"
+                if tasa_local and tasa_local > 0:
+                    total_bs = total * tasa_local
+                    msg += f"🇻🇪 **Total Bs:** Bs. {total_bs:,.2f} (Tasa: {tasa_local})\n"
 
             if custodias:
                 msg += "\n🔐 **CUSTODIA**\n"
                 for c in custodias:
-                    msg += f"• {c['Descripción']}: ${c.get('Restante')}\n"
+                    val_str = c.get("Restante", 0)
+                    val = self._parse_float(val_str)
+                    msg += f"• {c['Descripción']}: ${val:.2f}\n"
             
             return msg
         except Exception as e:
+            logger.error(f"Error resumen: {e}")
             return f"Error: {e}"
