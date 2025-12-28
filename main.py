@@ -341,8 +341,10 @@ def save_to_sheets(transaction_data: dict, tasa_usada: float = None) -> bool:
 
         tasa_usada_final = 1.0
         monto_usd = 0
+        
+        moneda_upper = moneda.upper()
 
-        if moneda == "Bs":
+        if moneda_upper in ["BS", "VES"]:
             if not tasa_usada:
                 try:
                     fecha_dt = datetime.strptime(fecha, "%Y-%m-%d %H:%M:%S")
@@ -353,15 +355,19 @@ def save_to_sheets(transaction_data: dict, tasa_usada: float = None) -> bool:
             
             tasa_usada_final = tasa_usada if tasa_usada else 0
             if tasa_usada_final > 0:
-                monto_usd = (monto_original / tasa_usada_final) * monto_usd_multiplicador
+                # monto_original ya tiene signo. monto_usd debe tener signo.
+                # Nota: monto_usd_multiplicador en linea 338/340 parece redundante si monto_original ya tiene signo negativo
+                # Vamos a usar abs(monto_original) / tasa, y luego aplicar el signo de 'tipo'
+                signo = -1 if tipo == "egreso" else 1
+                monto_usd = (abs(monto_original) / tasa_usada_final) * signo
         
-        elif moneda in ["USD", "USDT"]:
+        elif moneda_upper in ["USD", "USDT"]:
              monto_usd = monto_original
         
         row = [
             fecha, transaction_data['tipo'], transaction_data['categoria'],
             transaction_data['ubicacion'], moneda, monto_original,
-            tasa_usada_final if moneda == "Bs" else "", monto_usd,
+            tasa_usada_final if moneda_upper in ["BS", "VES"] else "", monto_usd,
             transaction_data['descripcion']
         ]
 
