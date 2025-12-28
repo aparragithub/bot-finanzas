@@ -165,7 +165,7 @@ class GestorSaldos:
                 monto_usd, tasa_usada = self.convertir_a_usd(monto, moneda)
 
                 if moneda.upper() == "BS":
-                    mensaje += f"   {moneda}: {monto:.0f}\n"
+                    mensaje += f"   {moneda}: {monto:,.2f}\n"
                     mensaje += f"   💱 Tasa: {tasa_usada:.2f} Bs/USD\n"
                     mensaje += f"   💵 Equivalente: ${monto_usd:.2f} USD\n"
                 else:
@@ -207,7 +207,7 @@ class GestorSaldos:
             monto_usd, tasa = self.convertir_a_usd(monto, moneda)
 
             if moneda.upper() == "BS":
-                mensaje += f"\n{moneda}: {monto:.0f}\n"
+                mensaje += f"\n{moneda}: {monto:,.2f}\n"
                 mensaje += f"Tasa: {tasa:.2f}\n"
                 mensaje += f"💵 ${monto_usd:.2f} USD\n"
             else:
