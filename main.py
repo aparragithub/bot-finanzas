@@ -84,54 +84,8 @@ def normalize_input(text: str) -> str:
     
     return normalized
 
-def parse_float(val):
-    """Parsea valores numéricos manejando puntos y comas"""
-    try:
-        if isinstance(val, (float, int)):
-            return float(val)
-        if isinstance(val, str):
-            # Limpiar caracteres no numéricos excepto , . -
-            val = re.sub(r'[^\d,.-]', '', val)
-            # Reemplazar coma por punto si es decimal (ej: 50,20 -> 50.20)
-            # Si hay punto y coma, asumir formato 1.000,00 -> 1000.00
-            if '.' in val and ',' in val:
-                val = val.replace('.', '').replace(',', '.')
-            elif ',' in val:
-                val = val.replace(',', '.')
-            return float(val)
-        return 0.0
-    except:
-        return 0.0
+    return normalized
 
-def calcular_saldo(ubicacion: str, moneda: str) -> float:
-    """Calcula el saldo actual para una ubicación y moneda específica"""
-    try:
-        spreadsheet = get_or_create_spreadsheet()
-        worksheet = spreadsheet.sheet1
-        # Usar numericise_ignore=['all'] para leer string raw y parsear nosotros
-        records = worksheet.get_all_records(numericise_ignore=['all'])
-        
-        saldo = 0.0
-        for r in records:
-            # Normalizar ubicación y moneda para comparar
-            r_ubic = str(r.get('Ubicación', '')).strip().lower()
-            r_mon = str(r.get('Moneda', '')).strip().upper()
-            r_tipo = str(r.get('Tipo', '')).strip().lower()
-            
-            if r_ubic == ubicacion.lower() and r_mon == moneda.upper():
-                try:
-                    monto = parse_float(r.get('Monto', 0))
-                    if r_tipo == 'ingreso':
-                        saldo += monto
-                    elif r_tipo == 'egreso':
-                        saldo -= monto
-                except:
-                    pass
-        
-        return saldo
-    except Exception as e:
-        logger.error(f"Error calculando saldo: {e}")
-        return 0.0
 
 
 def get_google_sheets_client():
@@ -750,8 +704,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 else:
                     ubicacion = 'Venezuela'  # Default
             
-            # Calcular saldo actual del sistema
-            saldo_sistema = calcular_saldo(ubicacion, moneda)
+            # Calcular saldo actual del sistema usando el Gestor de Saldos (Fuente de Verdad)
+            if not gestor_saldos: get_or_create_spreadsheet()
+            
+            # Recargar datos frescos
+            gestor_saldos.sheet = get_or_create_spreadsheet().sheet1
+            
+            saldos_dict = gestor_saldos.obtener_saldo_por_ubicacion()
+            saldo_sistema = saldos_dict.get(ubicacion, {}).get(moneda, 0.0)
+            
+            # Normalizar saldo sistema si viene con comas en el futuro (aunque gestor devuelve float)
+            saldo_sistema = float(saldo_sistema)
+            
             diferencia = saldo_sistema - saldo_real
             
             if abs(diferencia) < 0.01:
