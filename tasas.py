@@ -149,3 +149,48 @@ class GestorTasas:
                 
         logger.warning(f"No se encontró tasa histórica cerca de {fecha_str}")
         return None
+
+    def obtener_tasa_binance(self):
+        """
+        Obtiene la tasa de VENTA de USDT en Binance P2P.
+        Retorna el promedio de las primeras 20 órdenes de VENTA (User sells USDT).
+        Sin filtro de monto específico.
+        """
+        url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "asset": "USDT",
+            "fiat": "VES",
+            "merchantCheck": False,
+            "page": 1,
+            "payTypes": ["BankTransfer", "SpecificBank", "PagoMovil"], 
+            "publisherType": None,
+            "rows": 20, # Top 20
+            "tradeType": "SELL" 
+        }
+        
+        try:
+            logger.info(f"Consultando Binance P2P (Top 20)...")
+            response = requests.post(url, json=payload, headers=headers, timeout=10)
+            data = response.json()
+            
+            if data['code'] == "000000" and data['data']:
+                ads = data['data']
+                rates = [float(ad['adv']['price']) for ad in ads]
+                
+                if rates:
+                    # Promedio
+                    avg_rate = sum(rates) / len(rates)
+                    logger.info(f"Tasa Binance obtenida: {avg_rate:.2f} (Promedio Top {len(rates)})")
+                    return avg_rate
+            
+            logger.warning(f"Binance P2P: No se encontraron anuncios: {data.get('code')}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error Binance P2P: {e}")
+            return None

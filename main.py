@@ -945,7 +945,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def comando_simple_tasa(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"Tasa: {gestor_tasas.obtener_tasa()}")
+    msg = await update.message.reply_text("🔄 Consultando tasas...")
+    
+    # 1. Tasa BCV (Cacheada o API)
+    tasa_bcv = gestor_tasas.obtener_tasa()
+    
+    # 2. Tasa Binance (Tiempo real - Top 20)
+    # Solo si el usuario explícitamente pide "binance" o si quiere ver todo
+    tasa_binance = gestor_tasas.obtener_tasa_binance()
+    
+    txt = "💱 **TASAS DE CAMBIO**\n━━━━━━━━━━━━━━━━━━━━\n"
+    
+    if tasa_bcv:
+        txt += f"🏛️ **BCV:** {tasa_bcv:.2f} Bs/USD\n"
+    else:
+        txt += f"🏛️ **BCV:** No disponible\n"
+        
+    if tasa_binance:
+        txt += f"🔶 **Binance:** {tasa_binance:.2f} Bs/USDT\n"
+        # Calcular brecha
+        if tasa_bcv:
+            brecha = ((tasa_binance - tasa_bcv) / tasa_bcv) * 100
+            txt += f"📈 Brecha: {brecha:.1f}%\n"
+    else:
+        txt += f"🔶 **Binance:** Error consultando\n"
+        
+    txt += "\n_(Binance: Promedio Top 20 Ventas)_"
+    
+    await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=msg.message_id, text=txt, parse_mode="Markdown")
 
 async def comando_simple_deudas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
