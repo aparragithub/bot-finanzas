@@ -462,20 +462,38 @@ async def comando_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Error: {e}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 **Bot Finanzas V3 (Modo Cashea)**\n\n"
-        "**1. Saldos Iniciales:**\n"
-        "Para 'cargar' tus cuentas, registra un ingreso:\n"
-        "`ingreso 500 bs banesco saldo inicial`\n\n"
-        "**2. Deudas Antiguas:**\n"
-        "Para cargar lo que ya debes (sin sumarlo como gasto hoy):\n"
-        "`/importardeuda 40 'Zapatos Nike' principal`\n\n"
-        "**3. Nuevas Compras:**\n"
-        "`gasto 120 zapatos cashea`\n\n"
-        "**4. Ver Todo:**\n"
-        "`/saldo` → Tus cuentas\n"
-        "`/deudas` → Tus créditos"
-    )
+    help_msg = """👋 **Bienvenido a tu Bot Financiero V3** 🚀
+
+Aquí tienes tu "Chuleta" de comandos rápidos:
+
+📝 **GASTOS E INGRESOS (Básico)**
+• `gasto 50 bs comida` (Gastos del día a día)
+• `ingreso 2000 sueldo` (Tus entradas)
+• `gasté 15 usd uber` (Reconoce monedas)
+
+🛍️ **MODO CASHEA (V3)**
+• **Nueva Compra:** `gasto 120 zapatos cashea`
+  *(El bot calcula tu inicial y crea las cuotas automáticamente)*
+• **Importar Deuda Vieja:** `/importardeuda 20 3 "TV" 15/01/2025`
+  *(Para registrar lo que ya debes: 3 cuotas de $20)*
+
+🏦 **CONTROL DE SALDOS**
+• **Cargar Saldo Inicial:** `ingreso 500 bs banesco saldo inicial`
+• **Ver mis Cuentas:** `/saldo`
+
+💱 **CONVERSIONES (Binance)**
+• `cambié 100 usd a 98 usdt`
+• `cambié 50 usdt a 2500 bs`
+
+📸 **FACTURAS**
+¡Solo envíame una foto! Yo leo los montos y la fecha.
+
+💡 **COMANDOS ÚTILES**
+/balance - Resumen total de tu dinero
+/deudas - Ver tus créditos pendientes
+/tasa - Ver precio del dólar BCV
+"""
+    await update.message.reply_text(help_msg, parse_mode="Markdown")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text: return
