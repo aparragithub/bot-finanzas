@@ -371,56 +371,76 @@ async def comando_cashea(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {e}")
 
+
 async def comando_importardeuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Importa una deuda existente detallada.
-    Uso: /importardeuda [MontoCuota] [NumCuotas] [Descripción] [Fecha1raCuota]
-    Ej: /importardeuda 20 3 "TV Samsung" 15/01/2025
+    Importa deuda con parsing inteligente.
+    Soporta: /importardeuda [Texto libre con monto, cuotas y fecha]
+    Ej: /importardeuda 56 usd 1 cuota Monitor 30/12/2025
     """
     try:
         args = context.args
-        if not args or len(args) < 3:
-            await update.message.reply_text(
-                "❌ Uso Correcto:\n"
-                "`/importardeuda [MontoCuota] [NumCuotas] [Descripción] [Fecha]`\n\n"
-                "Ejemplos:\n"
-                "• \"3 cuotas de $20 del TV que vencen el 15/01\":\n"
-                "`/importardeuda 20 3 TV Samsung 15/01/2025`\n\n"
-                "• \"1 cuota de $50 del Super\":\n"
-                "`/importardeuda 50 1 Supermercado hoy`"
-            )
+        if not args:
+            await update.message.reply_text("❌ Uso: `/importardeuda [Monto] [Cuotas opcional] [Desc] [Fecha opcional]`")
             return
-
-        # 1. Parsear Montos
-        monto_cuota = float(args[0])
-        num_cuotas = int(args[1])
-        monto_total_deuda = monto_cuota * num_cuotas
-
-        # 2. Parsear Fecha (Último argumento)
-        fecha_raw = args[-1]
-        prox_venc = ""
-        try:
-            if fecha_raw.lower() == "hoy":
-                prox_venc = datetime.now().strftime("%Y-%m-%d")
-                desc_parts = args[2:-1]
-            elif "/" in fecha_raw or "-" in fecha_raw:
-                # Validar formato fecha
-                fecha_limpia = fecha_raw.replace('-', '/')
-                dt = datetime.strptime(fecha_limpia, "%d/%m/%Y")
+            
+        full_text = " ".join(args)
+        
+        # 1. Extraer FECHA (DD/MM/YYYY o hoy/ayer)
+        fecha_match = re.search(r'\b(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\b', full_text)
+        prox_venc = datetime.now().strftime("%Y-%m-%d") # Default hoy
+        
+        if fecha_match:
+            fecha_str = fecha_match.group(1).replace('-', '/')
+            try:
+                dt = datetime.strptime(fecha_str, "%d/%m/%Y")
                 prox_venc = dt.strftime("%Y-%m-%d")
-                desc_parts = args[2:-1]
-            else:
-                # Si no parece fecha, asumimos que es parte del nombre y la fecha es hoy o no se puso
-                prox_venc = datetime.now().strftime("%Y-%m-%d") # Default hoy
-                desc_parts = args[2:]
-        except:
-            await update.message.reply_text("❌ Formato de fecha inválido. Usa DD/MM/YYYY o 'hoy'.")
+                full_text = full_text.replace(fecha_match.group(0), "") # Remover fecha
+            except: pass
+        elif "hoy" in full_text.lower():
+            full_text = re.sub(r'\bhoy\b', '', full_text, flags=re.IGNORECASE)
+        elif "ayer" in full_text.lower():
+            prox_venc = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+            full_text = re.sub(r'\bayer\b', '', full_text, flags=re.IGNORECASE)
+
+        # 2. Extraer CUOTAS (N cuotas o simplemente segundo número)
+        num_cuotas = 1
+        # Buscar patrón explícito "X cuotas"
+        cuotas_match = re.search(r'\b(\d+)\s*(?:cuota|plazo|mes|pago)s?\b', full_text, re.IGNORECASE)
+        if cuotas_match:
+             num_cuotas = int(cuotas_match.group(1))
+             full_text = full_text.replace(cuotas_match.group(0), "")
+        else:
+             # Si no hay "cuotas", buscar si hay DOS números separados. asumimos 1ro=Monto, 2do=Cuotas
+             numeros = re.findall(r'\b\d+(?:\.\d+)?\b', full_text)
+             if len(numeros) >= 2:
+                 # Si el segundo número es entero pequeño (<24), asumimos que son cuotas
+                 posible_cuota = float(numeros[1])
+                 if posible_cuota.is_integer() and posible_cuota < 24:
+                     num_cuotas = int(posible_cuota)
+                     # Remover solo la primera ocurrencia de ese número para no borrar el precio si son iguales
+                     full_text = re.sub(r'\b' + str(int(posible_cuota)) + r'\b', '', full_text, count=1)
+
+        # 3. Extraer MONTO (Primer número que quede)
+        monto_match = re.search(r'\b\d+(?:\.\d+)?\b', full_text)
+        if not monto_match:
+            await update.message.reply_text("❌ No encontré el monto de la deuda.")
             return
-
-        descripcion = " ".join(desc_parts)
-
-        # 3. Determinar Línea (Cotidiana vs Principal)
-        # Regla simple: 1 cuota = Cotidiana, >1 = Principal
+            
+        monto_cuota = float(monto_match.group(0))
+        full_text = full_text.replace(monto_match.group(0), "", 1)
+        
+        # 4. Limpieza Final (Descripción)
+        # Remover palabras basura
+        basura = ['usd', 'bs', 'pesos', 'dolares', 'bolivares', '$', '€']
+        for b in basura:
+            full_text = re.sub(r'\b' + re.escape(b) + r'\b', '', full_text, flags=re.IGNORECASE)
+            
+        descripcion = re.sub(r'\s+', ' ', full_text).strip()
+        if not descripcion: descripcion = "Deuda Importada"
+        
+        # Calcular Totales
+        monto_total_deuda = monto_cuota * num_cuotas
         linea = "Cotidiana" if num_cuotas == 1 else "Principal"
         
         if not gestor_deudas: get_or_create_spreadsheet()
@@ -428,23 +448,21 @@ async def comando_importardeuda(update: Update, context: ContextTypes.DEFAULT_TY
         gestor_deudas.crear_deuda(
             descripcion=f"Imp: {descripcion}", 
             monto_total=monto_total_deuda, 
-            monto_inicial=0, # Porque registramos lo que FALTA por pagar
+            monto_inicial=0,
             tipo=f"Cashea ({linea}) - Importado",
             proximo_vencimiento=prox_venc
         )
         
-        msg = f"✅ **Deuda Importada Exitosamente**\n\n"
-        msg += f"📦 Itém: {descripcion}\n"
-        msg += f"� Cuotas Restantes: {num_cuotas} x ${monto_cuota}\n"
-        msg += f"💰 Deuda Total: ${monto_total_deuda:.2f}\n"
-        msg += f"� Próximo Pago: {prox_venc} ({linea})\n"
+        msg = f"✅ **Deuda Importada**\n"
+        msg += f"📦 {descripcion}\n"
+        msg += f"🔢 {num_cuotas} cuotas de ${monto_cuota}\n"
+        msg += f"📅 Vence: {prox_venc}"
         
         await update.message.reply_text(msg, parse_mode="Markdown")
 
-    except ValueError:
-        await update.message.reply_text("❌ Error: Monto y Cuotas deben ser números.")
     except Exception as e:
         await update.message.reply_text(f"❌ Error interno: {e}")
+
 
 
 async def comando_custodia(update: Update, context: ContextTypes.DEFAULT_TYPE):
