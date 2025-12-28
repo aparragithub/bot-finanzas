@@ -333,21 +333,27 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         img_buffer = BytesIO()
         await photo_file.download_to_memory(out=img_buffer)
         
-        prompt_vision = """Analiza esta imagen (Factura o App de Transporte). Responde SOLO JSON:
+        prompt_vision = """Analiza esta imagen (Factura, Cashea o App Transporte). Responde SOLO JSON:
         {
             "tipo": "Egreso",
-            "categoria": "Transporte, Alimentación, Salud, Servicios, Compras u Otro",
+            "categoria": "Compras, Transporte, Alimentación, Salud, Servicios u Otro",
             "ubicacion": "Ecuador" o "Venezuela" (Bs=Venezuela),
             "moneda": "USD" o "Bs",
-            "monto": número (TOTAL FINAL),
+            "monto": número (TOTAL PAGADO AL MOMENTO),
             "descripcion": "nombre del servicio/local",
             "fecha": "DD/MM/YYYY" o null,
-            "tasa_especifica": número o null (Tasa Cambio Implícita Bs/USD)
+            "tasa_especifica": número o null,
+            "es_cashea": boolean (true si es recibo de Cashea),
+            "cashea_financiado_usd": número o null (Solo si es Cashea, monto financiado en USD)
         }
         INSTRUCCIONES CLAVE:
-        1. Si es Yummy/Ridery y hay precios en $ y Bs (ej: "$4.38 / Bs 1291"), y el método es "Pago Móvil", USA Bs como moneda y 1291 como monto.
-        2. Si usas Bs, CALCULA la tasa_especifica = MontoBs / MontoS. (Ej: 1291/4.38 = 294.97).
-        3. Ignora 16% IVA para la tasa. Solo tasa de cambio.
+        1. Si es Yummy/Ridery (Precios $/Bs) y "Pago Móvil": Moneda=Bs, Monto=Bs, Tasa = Bs/$.
+        2. Si es CASHEA ("Pago Cuota Inicial"):
+           - "monto": Monto de la CUOTA INICIAL (en Bs si dice BS).
+           - "cashea_financiado_usd": El valor "MONTO FINANCIADO USD".
+           - "tasa_especifica": Tasa del documento si existe.
+           - "descripcion": "Compra Cashea en [Local]".
+        3. Ignora IVA (16%) para la tasa.
         """
         
         # Lógica simplificada Gemini
@@ -370,9 +376,42 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
              
         tasa = transaction.get('tasa_especifica') if transaction['moneda'] == 'Bs' else None
         
+        # 1. Registrar el Gasto (Inicial)
         success, msg = save_to_sheets(transaction, tasa)
+        
+        # 2. Si es Cashea, Registrar Deuda
+        if success and transaction.get('es_cashea'):
+            try:
+                financiado_usd = float(transaction.get('cashea_financiado_usd', 0))
+                if financiado_usd > 0:
+                    local = transaction.get('descripcion', 'Compra Cashea')
+                    fecha = transaction.get('fecha', datetime.now().strftime("%d/%m/%Y"))
+                    # Normalizar fecha
+                    try:
+                        f_dt = datetime.strptime(fecha, "%d/%m/%Y")
+                        f_str = f_dt.strftime("%Y-%m-%d")
+                    except:
+                        f_str = datetime.now().strftime("%Y-%m-%d")
+
+                    # Crear Plan de Cuotas (3 Cuotas estándar)
+                    monto_cuota = financiado_usd / 3
+                    
+                    if not gestor_deudas: get_or_create_spreadsheet()
+                    
+                    ok_deuda, msg_deuda = gestor_deudas.crear_plan_cuotas(
+                        descripcion=local,
+                        monto_cuota=monto_cuota,
+                        num_cuotas=3,
+                        fecha_inicio=f_str,
+                        linea="Principal", # Asumimos principal por defecto
+                        fuente="Cashea"
+                    )
+                    msg += f"\n📉 **Deuda Registrada:**\nFinanciado: ${financiado_usd:.2f}\n{msg_deuda}"
+            except Exception as e:
+                msg += f"\n⚠️ Error registrando deuda Cashea: {e}"
+
         if success:
-            await update.message.reply_text(f"✅ Factura Guardada!\n💵 Total: {transaction['moneda']} {transaction.get('monto')}\n📝 {transaction.get('descripcion')}")
+            await update.message.reply_text(f"✅ Transacción Guardada!\n💵 Gasto: {transaction['moneda']} {transaction.get('monto')}\n{msg}")
         else:
             await update.message.reply_text(f"❌ Error: {msg}")
 
