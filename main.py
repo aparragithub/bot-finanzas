@@ -462,7 +462,7 @@ async def comando_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Error: {e}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    update.message.reply_text(
+    await update.message.reply_text(
         "👋 **Bot Finanzas V3 (Modo Cashea)**\n\n"
         "**1. Saldos Iniciales:**\n"
         "Para 'cargar' tus cuentas, registra un ingreso:\n"
@@ -497,6 +497,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error: {e}")
         await update.message.reply_text("❌ No entendí.")
 
+
+async def comando_simple_tasa(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(f"Tasa: {gestor_tasas.obtener_tasa()}")
+
+async def comando_simple_deudas(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(gestor_deudas.obtener_resumen())
+
 def main():
     if not TELEGRAM_TOKEN: return
     try: get_or_create_spreadsheet()
@@ -508,8 +515,8 @@ def main():
     app.add_handler(CommandHandler("cashea", comando_cashea))
     app.add_handler(CommandHandler("importardeuda", comando_importardeuda))
     app.add_handler(CommandHandler("saldo", comando_saldo))
-    app.add_handler(CommandHandler("tasa", lambda u,c: u.message.reply_text(f"Tasa: {gestor_tasas.obtener_tasa()}")))
-    app.add_handler(CommandHandler("deudas", lambda u,c: u.message.reply_text(gestor_deudas.obtener_resumen())))
+    app.add_handler(CommandHandler("tasa", comando_simple_tasa))
+    app.add_handler(CommandHandler("deudas", comando_simple_deudas))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.run_polling()
