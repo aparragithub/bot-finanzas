@@ -348,11 +348,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         INSTRUCCIONES CLAVE:
         1. Si es Yummy/Ridery (Precios $/Bs) y "Pago Móvil": Moneda=Bs, Monto=Bs, Tasa = Bs/$.
-        2. Si es CASHEA ("Pago Cuota Inicial"):
-           - "monto": Monto de la CUOTA INICIAL (en Bs si dice BS).
-           - "cashea_financiado_usd": El valor "MONTO FINANCIADO USD".
-           - "tasa_especifica": Tasa del documento si existe.
-           - "descripcion": "Compra Cashea en [Local]".
+        2. Si es CASHEA:
+           - BUSCA "MONTO BS" o "PAGO CUOTA INICIAL". Ese es el `monto` (Gasto). Moneda="Bs".
+           - `cashea_financiado_usd`: Busca "MONTO FINANCIADO USD" (ej: 77.79).
+           - `tasa_especifica`: Calcula Monto Bs / Monto USD (si aparecen ambos en la inicial).
+           - `descripcion`: "Inicial Cashea [Local]".
+           - `es_cashea`: true.
         3. Ignora IVA (16%) para la tasa.
         """
         
