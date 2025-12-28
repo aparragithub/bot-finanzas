@@ -698,7 +698,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if ubicacion_input:
                 ubicacion = ubicacion_input.capitalize()
             else:
-                if moneda in ['BS', 'VES']:
+                if moneda.upper() in ['BS', 'VES',]:
                     ubicacion = 'Venezuela'
                 elif moneda == 'USD':
                     ubicacion = 'Ecuador'
