@@ -343,112 +343,151 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         img_buffer = BytesIO()
         await photo_file.download_to_memory(out=img_buffer)
         
-        prompt_vision = """Analiza esta imagen (Factura, Cashea o App Transporte). Responde SOLO JSON:
+        prompt_vision = """Analiza esta imagen (Factura, Cashea, Historial Binance).
+        Responde SIEMPRE una LISTA de objetos JSON: [{}, {}].
+        
+        Estructura Base:
         {
-            "tipo": "Egreso",
-            "categoria": "Compras, Transporte, Alimentación, Salud, Servicios u Otro",
-            "ubicacion": "Ecuador" o "Venezuela" (Bs=Venezuela),
-            "moneda": "USD" o "Bs",
-            "monto": número (TOTAL PAGADO AL MOMENTO),
+            "tipo": "Egreso" o "Ingreso" o "Intercambio",
+            "categoria": "Compras, Transporte, Alimentación, Salud, Servicios, Comisión u Otro",
+            "ubicacion": "Ecuador" o "Venezuela" o "Binance",
+            "moneda": "USD" o "Bs" o "USDT",
+            "monto": número,
             "descripcion": "nombre del servicio/local",
             "fecha": "DD/MM/YYYY" o null,
-            "tasa_especifica": número o null,
+            
+            # Campos Específicos para Intercambio/Binance:
+            "es_intercambio": boolean,
+            "monto_salida": número (lo que sale),
+            "moneda_salida": string (ej: USDT),
+            "ubicacion_salida": string (ej: Binance),
+            "monto_entrada": número (lo que entra),
+            "moneda_entrada": string (ej: Bs),
+            "ubicacion_entrada": string (ej: Venezuela),
+            
             "es_cashea": boolean (true si es recibo de Cashea),
-            "cashea_financiado_usd": número o null (Solo si es Cashea, monto financiado en USD)
+            "cashea_financiado_usd": número o null,
+            "tasa_especifica": número o null
         }
+        
         INSTRUCCIONES CLAVE:
-        1. Si es Yummy/Ridery (Precios $/Bs) y "Pago Móvil": Moneda=Bs, Monto=Bs, Tasa = Bs/$.
-        2. Si es CASHEA (texto "PAGO CUOTA INICIAL CASHEA"):
-           - Encuentra la línea exacta "MONTO BS :11.798,80" -> monto = 11798.80
-           - Moneda = "Bs"
-           - Encuentra la línea exacta "MONTO FINANCIADO USD: 77.79" -> cashea_financiado_usd = 77.79
-           - Si hay "MONTO USD: 40,00", úsalo para calcular tasa: tasa_especifica = 11798.80 / 40.00
-           - descripcion = "Inicial Cashea SUPERMERCADO RIO"
-           - es_cashea = true
-           EJEMPLO JSON CASHEA:
-           {
-             "tipo": "Egreso",
-             "categoria": "Compras",
-             "ubicacion": "Venezuela",
-             "moneda": "Bs",
-             "monto": 11798.80,
-             "descripcion": "Inicial Cashea SUPERMERCADO RIO",
-             "fecha": "28/12/2025",
-             "tasa_especifica": 294.97,
-             "es_cashea": true,
-             "cashea_financiado_usd": 77.79
-           }
-        3. Ignora IVA (16%) para la tasa.
+        1. Si es BINANCE "Sell USDT": Es un Intercambio. Salida=USDT/Binance, Entrada=Bs/Venezuela. (Monto=Bs Recibidos, pero necesitamos los dos montos para tasa implícita).
+        2. Si es BINANCE "Buy USDT": Es un Intercambio. Salida=USD/Ecuador (o Bs/Vzla si dice Bs), Entrada=USDT/Binance.
+        3. CASHEA: "monto" es la INICIAL. "cashea_financiado_usd" es el resto.
+        4. Detecta FECHAS en formato DD-MM HH:mm (Asume año actual).
         """
         
         # Lógica simplificada Gemini
-        img_buffer.seek(0)
-        from PIL import Image
-        image = Image.open(img_buffer)
+        image_parts = [
+            {
+                "mime_type": "image/jpeg",
+                "data": img_buffer.getvalue()
+            }
+        ]
+
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content([prompt_vision, image_parts[0]])
         
-        model = genai.GenerativeModel('models/gemini-flash-latest')
-        response = model.generate_content([prompt_vision, image])
         result_text = response.text.strip()
-        
         if result_text.startswith('```'): 
-            result_text = result_text.split('```')[1].replace('json','').strip()
+             result_text = result_text.split('```')[1]
+             if result_text.strip().startswith('json'):
+                result_text = result_text.strip()[4:]
+             result_text = result_text.strip()
             
-        transaction = json.loads(result_text)
-        
-        # Mapear 'total' a 'monto' si es necesario
-        if 'total' in transaction and 'monto' not in transaction:
-            transaction['monto'] = transaction['total']
-             
-        tasa = transaction.get('tasa_especifica') if transaction['moneda'] == 'Bs' else None
-        
-        # 1. Registrar el Gasto (Inicial)
-        success, msg = save_to_sheets(transaction, tasa)
-        
-        # 2. Si es Cashea, Registrar Deuda
-        if success and transaction.get('es_cashea'):
+        # Parsear JSON (puede ser lista o dict)
+        try:
+            data = json.loads(result_text)
+        except:
+             # Try to fix brackets if missing
+            if not result_text.startswith('['): result_text = '[' + result_text + ']'
             try:
-                financiado_usd = float(transaction.get('cashea_financiado_usd', 0))
-                if financiado_usd > 0:
-                    local = transaction.get('descripcion', 'Compra Cashea')
-                    fecha = transaction.get('fecha', datetime.now().strftime("%d/%m/%Y"))
-                    # Normalizar fecha
-                    try:
-                        f_dt = datetime.strptime(fecha, "%d/%m/%Y")
-                        f_str = f_dt.strftime("%Y-%m-%d")
-                    except:
-                        f_str = datetime.now().strftime("%Y-%m-%d")
+                data = json.loads(result_text)
+            except:
+                data = [] # Fallback
+            
+        if isinstance(data, dict): data = [data]
+        
+        msj_final = ""
+        
+        for tx in data:
+            # 🔄 LÓGICA INTERCAMBIO (BINANCE)
+            if tx.get('es_intercambio'):
+                # Crear transacción de SALIDA
+                t_out = {
+                    'fecha': tx.get('fecha'),
+                    'tipo': 'Egreso',
+                    'categoria': 'Intercambio',
+                    'ubicacion': tx.get('ubicacion_salida', 'Binance'),
+                    'moneda': tx.get('moneda_salida', 'USDT'),
+                    'monto': float(tx.get('monto_salida', 0)),
+                    'descripcion': f"Venta/Cambio hacia {tx.get('moneda_entrada')}"
+                }
+                
+                # Crear transacción de ENTRADA
+                t_in = {
+                    'fecha': tx.get('fecha'),
+                    'tipo': 'Ingreso',
+                    'categoria': 'Intercambio',
+                    'ubicacion': tx.get('ubicacion_entrada', 'Venezuela'),
+                    'moneda': tx.get('moneda_entrada', 'Bs'),
+                    'monto': float(tx.get('monto_entrada', 0)),
+                    'descripcion': f"Recibido de {tx.get('moneda_salida')}",
+                    'raw_text': f"Tasa Implicita Binance" # Marker
+                }
+                
+                # Calcular tasa implícita si es necesario
+                try:
+                    tasa = float(tx.get('monto_entrada', 0)) / float(tx.get('monto_salida', 1)) if tx.get('monto_salida', 0) > 0 else None
+                except: tasa = None
+                
+                s1, m1 = save_to_sheets(t_out)
+                # Para la entrada, pasamos la tasa calculada para que el reporte cuadre
+                s2, m2 = save_to_sheets(t_in, tasa_usada=tasa)
+                
+                msj_final += f"\n✅ **Intercambio:**\n📤 -{t_out['monto']} {t_out['moneda']}\n📥 +{t_in['monto']} {t_in['moneda']}\n"
 
-                    # Crear Plan de Cuotas (3 Cuotas estándar)
-                    monto_cuota = financiado_usd / 3
+            else:
+                 # Lógica Normal de Gasto/Ingreso
+                required_keys = ['tipo', 'categoria', 'ubicacion', 'moneda', 'monto', 'descripcion']
+                for key in required_keys:
+                    if key not in tx:
+                        if key == 'ubicacion': tx['ubicacion'] = 'Venezuela'
+                        elif key == 'moneda': tx['moneda'] = 'Bs'
+                
+                try: tx['monto'] = float(tx['monto']) 
+                except: tx['monto'] = 0
+                
+                tasa_esp = tx.get('tasa_especifica') if tx['moneda'] == 'Bs' else None
+                success, msg = save_to_sheets(tx, tasa_esp)
+                
+                if success:
+                    msj_final += f"\n✅ **{tx['descripcion']}**: {tx['monto']} {tx['moneda']} ({tx['tipo']}){msg}"
                     
-                    if not gestor_deudas: get_or_create_spreadsheet()
-                    
-                    ok_deuda, msg_deuda = gestor_deudas.crear_plan_cuotas(
-                        descripcion=local,
-                        monto_cuota=monto_cuota,
-                        num_cuotas=3,
-                        fecha_inicio=f_str,
-                        linea="Principal", # Asumimos principal por defecto
-                        fuente="Cashea"
-                    )
-                    msg += f"\n📉 **Deuda Registrada:**\nFinanciado: ${financiado_usd:.2f}\n{msg_deuda}"
-            except Exception as e:
-                msg += f"\n⚠️ Error registrando deuda Cashea: {e}"
+                    if tx.get('es_cashea'):
+                        try:
+                            financiado_usd = float(tx.get('cashea_financiado_usd', 0))
+                            if financiado_usd > 0:
+                                local = tx.get('descripcion', 'Compra Cashea')
+                                f_str = datetime.now().strftime("%Y-%m-%d") 
+                                try:
+                                    f_dt = datetime.strptime(tx.get('fecha', ''), "%d/%m/%Y")
+                                    f_str = f_dt.strftime("%Y-%m-%d")
+                                except: pass
+                                
+                                monto_cuota = financiado_usd / 3
+                                if not gestor_deudas: get_or_create_spreadsheet()
+                                ok, m_deuda = gestor_deudas.crear_plan_cuotas(local, monto_cuota, 3, f_str, "Principal", "Cashea")
+                                msj_final += f"\n📉 **Deuda:** ${financiado_usd} ({m_deuda})"
+                        except: pass
+                else:
+                    msj_final += f"\n❌ Error en {tx.get('descripcion')}: {msg}"
 
-        if success:
-            await update.message.reply_text(f"✅ Transacción Guardada!\n💵 Gasto: {transaction['moneda']} {transaction.get('monto')}\n{msg}")
-        else:
-            await update.message.reply_text(f"❌ Error: {msg}")
+        await update.message.reply_text(msj_final if msj_final else "❓ No detecté transacciones válidas.")
 
     except Exception as e:
-        logger.error(f"Error Vision: {e}")
-        await update.message.reply_text(
-            "❌ Error procesando imagen.\n\n"
-            "💡 **Para Cashea**, envíame este formato:\n"
-            "`cashea inicial [monto_bs] financiado [monto_usd] [local] [fecha]`\n\n"
-            "Ejemplo:\n"
-            "`cashea inicial 11798.80 financiado 77.79 Supermercado Rio 28/12/2025`"
-        )
+        logger.error(f"Error procesando foto: {e}")
+        await update.message.reply_text("❌ Error analizando la imagen.")
 
 # --- COMANDOS ESTRUCTURALES ---
 
