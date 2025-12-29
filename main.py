@@ -1022,6 +1022,7 @@ async def comando_simple_deudas(update: Update, context: ContextTypes.DEFAULT_TY
 
 def main():
     if not TELEGRAM_TOKEN: return
+    print("🚀 Iniciando Bot Finanzas v3.2 (IDs Visibles + AutoRepair)...")
     try: get_or_create_spreadsheet()
     except: pass
     keep_alive.keep_alive()

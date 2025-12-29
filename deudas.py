@@ -205,15 +205,19 @@ class GestorDeudas:
             referencia = referencia.lower()
             
             for i, deuda in enumerate(todas):
+                deuda_id_sheet = str(deuda.get("ID", "")).lower()
                 desc = str(deuda.get("Descripción", "")).lower()
                 estado = str(deuda.get("Estado", "")).lower()
-                if estado != "pagado" and referencia in desc:
-                    candidato = deuda
-                    candidato_idx = i
-                    break
+                
+                # Check ID matching OR Description matching
+                if estado != "pagado":
+                    if referencia == deuda_id_sheet or referencia in desc:
+                        candidato = deuda
+                        candidato_idx = i
+                        break
             
             if not candidato:
-                return False, f"No encontré deuda pendiente con '{referencia}'"
+                return False, f"No encontré deuda pendiente con ID o Descripción '{referencia}'"
 
             try:
                 # Usar _parse_float para leer los valores string
@@ -280,8 +284,18 @@ class GestorDeudas:
             except:
                 return False, "Error leyendo datos de la deuda", None
 
+            # AUTO-REPAIR: Si dice pagado/restante 0 pero math dice contrario
+            total_val = self._parse_float(candidato.get("Monto Total", 0))
+            pagado_ant = self._parse_float(candidato.get("Pagado", 0))
+            restante_calc = total_val - pagado_ant
+            
+            if restante <= 0.01 and restante_calc > 0.01:
+                logger.warning(f"AUTO-REPAIR Deuda {deuda_id}: Restante sheet 0 vs Calc {restante_calc}. Proceeding.")
+                restante = restante_calc
+                estado = "Pendiente"
+
             if estado.lower() == "pagado" or restante <= 0.01:
-                return False, f"La deuda {deuda_id} ya está pagada.", None
+                return False, f"La deuda {deuda_id} ya está registrada como PAGADA.", None
 
             # Calcular monto en Bs
             monto_bs = restante * tasa_cambio
@@ -290,7 +304,7 @@ class GestorDeudas:
             # Pagado += Restante
             # Restante = 0
             # Estado = Pagado
-            pagado_ant = self._parse_float(candidato.get("Pagado", 0))
+            # pagado_ant ya lo tenemos
             nuevo_pagado = pagado_ant + restante
             
             fila = candidato_idx + 2
@@ -357,7 +371,8 @@ class GestorDeudas:
                     venc = d.get("Próximo Vencimiento", "N/A")
                     fuente = d.get("Fuente", "")
                     fuente_str = f" ({fuente})" if fuente else ""
-                    msg += f"• {d['Descripción']}{fuente_str}: **${restante:.2f}** ({venc})\n"
+                    id_deuda = d.get("ID", "S/ID")
+                    msg += f"• [{id_deuda}] {d['Descripción']}{fuente_str}: **${restante:.2f}** ({venc})\n"
                 
                 msg += f"💰 **Total USD:** ${total:.2f}\n"
                 if tasa_local and tasa_local > 0:
