@@ -385,7 +385,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }
         ]
 
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.0-flash')
         response = model.generate_content([prompt_vision, image_parts[0]])
         
         result_text = response.text.strip()
