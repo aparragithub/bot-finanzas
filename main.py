@@ -18,6 +18,7 @@ except:
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.request import HTTPXRequest
 from groq import Groq
 import gspread
 from google.oauth2.service_account import Credentials
@@ -1026,7 +1027,8 @@ def main():
     try: get_or_create_spreadsheet()
     except: pass
     keep_alive.keep_alive()
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    t_request = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
+    app = Application.builder().token(TELEGRAM_TOKEN).request(t_request).build()
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("cashea", comando_cashea))
